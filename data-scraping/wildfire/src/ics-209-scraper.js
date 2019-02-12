@@ -1,6 +1,13 @@
+// This is the main script for scraping all of the ics-209 data tables available at
+// https://fam.nwcg.gov/fam-web/hist_209/report_list_209
+
 const dataGetter = require('./ics-209-report-getter').ics209ReportGetter;
 const path = require('path');
 
+/**
+ * Path to output folder. Ensures we get consistent folder placement no matter what pwd is.
+ * @type {void | Promise<void> | Promise<string>}
+ */
 const outputFolder = path.resolve(__dirname + '/../output');
 
 /**
@@ -69,9 +76,12 @@ const main = (outputFolder, locations, startYear, endYear) => {
 	for (let year=startYear; year<endYear; year++) {
 		for (let j=0; j<locations.length; j++) {
 			const currentLocation = locations[j]
-			dataGetter(year, currentLocation.locationCode, currentLocation.locationName, outputFolder + `/${year}`);
+			dataGetter(year, currentLocation.locationCode, currentLocation.locationName, outputFolder
+				+ `/${year}`);
 		}
 	}
 };
 
+// Call the main mehtod to collect the data in [2003, 2014). Note that 2002 does not respect the address formatting of
+// the other years on the server, so we cannot auto-pull it here
 main(outputFolder, allLocations, 2003, 2014);
