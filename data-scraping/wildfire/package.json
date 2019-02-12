@@ -1,0 +1,16 @@
+{
+  "name": "wildfire",
+  "version": "1.0.0",
+  "description": "Scripts for scraping wildfire data",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Michael Liamos",
+  "license": "ISC",
+  "dependencies": {
+    "jsdom": "^13.2.0",
+    "request": "^2.88.0",
+    "shelljs": "^0.8.3"
+  }
+}

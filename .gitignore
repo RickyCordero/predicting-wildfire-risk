@@ -1,0 +1,6 @@
+data-scraping/wildfire/node_modules
+data-scraping/wildfire/output
+data-scraping/wildfire/package-lock.json
+
+.DS_Store
+.idea
