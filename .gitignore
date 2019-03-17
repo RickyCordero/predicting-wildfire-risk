@@ -2,5 +2,9 @@ data-scraping/wildfire/node_modules
 data-scraping/wildfire/output
 data-scraping/wildfire/package-lock.json
 
+scripts/*.env
+scripts/log
+scripts/node_modules
+
 .DS_Store
 .idea
