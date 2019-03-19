@@ -147,7 +147,7 @@ function createUniqueView(query, outputDbUrl, outputDbName, outputCollectionName
 }
 
 /**
- * Creates the local arcgis.wildfires collection from the local arcgis.events collection
+ * Creates the local arcgis.wildfires collection from the local arcgis.unique collection
  */
 function createWildfiresFromUnique() {
     return new Promise((resolve, reject) => {

@@ -139,7 +139,7 @@ Creates the local arcgis.unique collection by applying the filterMaxInfo functio
 
 4) createWildfiresFromUnique
 
-Creates the local arcgis.wildfires collection by filtering out non-wildfire events from the local arcgis.events collection
+Creates the local arcgis.wildfires collection by filtering out non-wildfire events from the local arcgis.unique collection
 
 5) createStandardizedWildfires
 
