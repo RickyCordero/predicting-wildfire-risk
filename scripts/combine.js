@@ -1,7 +1,14 @@
 const logger = require('./logger');
 
+const async = require('async');
+const MongoClient = require('mongodb').MongoClient;
+const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
+const { Transform } = require('stream');
+const { COMBINE_CONFIG } = require('./config');
+const { loadSave } = require('./db');
+
 /*
-    Sample dark sky historical weather response object at the daily interval (with time transformation):
+    Sample Dark Sky Time Machine response object at the 'daily' interval (with time transformation):
 
             https://darksky.net/dev/docs#data-point-object
             {
@@ -44,101 +51,277 @@ const logger = require('./logger');
             }
 */
 
+
 /**
- * Constructs an array of objects corresponding to training data
- * @param {Object} config - The configuration object containing the following properties:
- *  * @param {String} interval - A string representing the level of time granularity to include in each request object
- *  * @param {Number} units - The number of intervals of data to collect after each wildfire's ignition time
- *  * @param {Array<String>} props - The array of climate data properties corresponding to descriptive features
- *  * @param {Array<Object>} wildfires - The array of wildfire event objects
- *  * @param {Array<Object>} climateData - The array of climate data objects where each object corresponds to a single day of hourly or daily data
- * @returns {Array<Object>} - The array of objects corresponding to the final training dataset
+ * Transforms a climate data object
+ * @param {Object} datum - The climate datum object
  */
-const combineData = (config) => {
-    /*
-     goal:
-        {
-            event: wildfire['Incident Name'],
-            t_n: climate['temperature'],
-            ...
-            tn: climate['temperature'],
-            w_n: climate['windSpeed'],
-            ...
-            wn: climate['windSpeed'],
-            h_n: climate['humidity'],
-            ...
-            hn: climate['humidity'],
-            area: wildfire['Size']
-        }
-    */
-    // no field means the intervally array exists but is empty
-    // null value means no intervally data was found from the api
-    return config.wildfires.reduce((res, wildfire) => {
-        const climateDatum = config.climateData.find(d => d["Event"] == wildfire["Event"]);
-        let events = [];
-        if (climateDatum) { // if we find a climate datum with same id as wildfire
-            if (climateDatum[config.interval]) { // if climate datum has data for certain interval
-                const features = climateDatum[config.interval]
-                    .map((datum, idx) => {
-                        if (datum.error) { // if datum had an error
-                            logger.warn(`climate datum with id '${climateDatum.id}' had an error, returning null for each prop`);
-                            logger.warn(datum.error);
-                        }
-                        const label = idx - config.units < 0 ?
-                            `_${config.units - idx}` : idx - config.units;
-                        return config.props.reduce((acc, prop) => {
-                            return ({ ...acc, [`${prop}${label}`]: datum[prop] })
-                        }, {});
-                    })
-                    .reduce((acc, obj) => ({ ...acc, ...obj }), {});
-                events.push({
-                    'id': wildfire['id'],
-                    'event': wildfire['Incident Name'],
-                    ...features,
-                    'area': wildfire['Size']
-                });
-
-            } else {
-                logger.warn(`climate datum with id '${climateDatum.id}' does not contain interval '${config.interval}', not using`);
-            }
-        }
-        return res.concat(events);
-    }, []);
-};
-
-// TODO: Implement this function using loadSave
-function cleanClimateData() {
-    // if (config.interval == 'hourly') {
-    //     // remove all extra data points collected in overshot data requests
-    //     climateResult[config.interval] = climateResult[config.interval].filter(datum => {
-    //         return moment.parseZone(datum.time).isBetween(startDate, endDate, 'hour', '[]');
-    //     });
-    // }
-    if (obj[interval] && obj[interval].data && obj[interval].data.length > 0) {
-        if (interval == 'hourly' && obj[interval].data.length == 24 || interval == 'daily' && obj[interval].data.length == 1) {
-            const offset = startDate.utcOffset();
-            obj[interval].data.forEach(x => {
-                // populate a particular interval's array of data points in the results object
-                /**
-                 * The UNIX time at which this data point begins. minutely data point are always aligned to the top
-                 *  of the minute, hourly data point objects to the top of the hour, and daily data point objects to
-                 *  midnight of the day, all according to the local time zone.
-                 */
-                results[interval].push(Object.assign(x, { 'time': moment.unix(x.time).utcOffset(offset).format() }));
-            });
-        } else {
-            const sizeError = `not enough data points found for '${interval}' data, found only ${obj[interval].data.length} point(s) for (${latitude},${longitude})`;
-            logger.warn(sizeError);
-            const sizeErrorObj = { time: time, error: sizeError };
-            results[interval].push(sizeErrorObj);
-        }
-    } else {
-        const intervalError = `no '${interval}' data found for (${latitude},${longitude})`;
-        logger.warn(intervalError);
-        const intervalErrorObj = { time: time, error: intervalError };
-        results[interval].push(intervalErrorObj);
+function transformClimateDatum(datum) {
+    /**
+     * Example schema of a climate.training document
+     * {
+     *      hourly: [ // 29 items
+     *          {
+     *              latitude: 33.6172,
+     *              longitude: -116.15083
+     *              timezone: "America/Los_Angeles"
+     *              hourly: {
+     *                  summary: "Mostly cloudy until morning and breezy starting in the afternoon",
+     *                  icon: "wind",
+     *                  data: [ // 24 items
+     *                          {
+     *                            time: 1011772800,
+     *                            summary: "Overcast",
+     *                            icon: "cloudy",
+     *                            precipType: "rain",
+     *                            temperature: 55.44,
+     *                            apparentTemperature: 55.44,
+     *                            dewPoint: 20.01,
+     *                            humidity: 0.25,
+     *                            pressure: 1014.73,
+     *                            windSpeed: 7.88,
+     *                            windGust: 11.51,
+     *                            windBearing: 342,
+     *                            cloudCover: 1,
+     *                            uvIndex: 0,
+     *                            visibility: 10
+     *                          },
+     *                          ...
+     *                  ]
+     *              },
+     *              offset: -8
+     *          },
+     *          ...
+     *      ],
+     *      requests: 29,
+     *      startDate: "2002-01-23T00:00:00-08:00"
+     *      endDate: "2002-02-20T00:00:00-08:00",
+     *      latitude: -116.15083,
+     *      Event: "CA-RRU-009418"
+     * }
+     */
+    const res = {
+        "Event": datum["Event"],
+        points: []
+    };
+    let key;
+    if (datum["hourly"]) {
+        key = "hourly";
+    } else if (datum["daily"]) {
+        key = "daily";
     }
+    const objects = datum[key];
+    if (objects) {
+        res.points = objects.reduce((points, dayObj) => {
+            if (dayObj[key]) {
+                if (dayObj[key].data) {
+                    return points.concat(dayObj[key].data);
+                }
+            }
+            return points;
+        }, []);
+    }
+    return res;
 }
+
+const transformClimateDatumStream = (transformChunk) => new Transform({
+    readableObjectMode: true, // pass an object
+    writableObjectMode: true, // read an object
+    transform(chunk, _encoding, callback) {
+        const transformedDatum = transformChunk(chunk);
+        this.push(transformedDatum);
+        callback();
+    }
+});
+
+function createClimateStreamView(query, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, cb, transform) {
+    const sourceDbUrl = "mongodb://localhost:27017";
+    const sourceDbName = "climate";
+    MongoClient.connect(sourceDbUrl, (sourceDbError, sourceDbClient) => {
+        if (sourceDbError) {
+            logger.warn('yo, there was an error connecting to the local database');
+            cb(sourceDbError);
+        } else {
+            MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
+                if (outputDbError) {
+                    logger.warn('yo, there was an error connecting to the local database');
+                    cb(outputDbError);
+                } else {
+                    const sourceDb = sourceDbClient.db(sourceDbName);
+                    const sourceCollection = sourceDb.collection(sourceCollectionName);
+                    const outputDb = outputDbClient.db(outputDbName);
+
+                    const processedClimateOutputDbConfig = {
+                        dbURL: "",
+                        dbConnection: outputDb,
+                        batchSize: 50,
+                        collection: outputCollectionName
+                    };
+
+                    const readStream = sourceCollection.find(query).stream();
+                    const writeStream = streamToMongoDB(processedClimateOutputDbConfig);
+
+                    readStream
+                        .pipe(transformClimateDatumStream(transform))
+                        .pipe(writeStream)
+                        .on('data', (chunk) => {
+                            logger.info('processing chunk');
+                        })
+                        .on('error', (err) => {
+                            logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
+                            cb(err);
+                        })
+                        .on('finish', () => {
+                            logger.info('finished cleaning climate data');
+                            sourceDbClient.close();
+                            outputDbClient.close();
+                            cb();
+                        });
+                }
+            });
+        }
+    });
+}
+
+/**
+ * Creates the climate.filteredPoints collection from the climate.training collection
+ */
+function createFilteredPoints() { // uses buffer
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training";
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "filteredPoints";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            cb(null, docs
+                .map(transformClimateDatum)
+                .filter((doc) => {
+                    return doc.points.length == 696;
+                }));
+        });
+    });
+}
+
+/**
+ * Creates the training.training collection from the climate.filteredPoints collection
+ */
+function createWildfirePoints() { // uses buffer
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "filteredPoints";
+
+        const wildfireDbUrl = "mongodb://localhost:27017";
+        const wildfireDbName = "arcgis";
+        const wildfireCollectionName = "training"
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "training";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            MongoClient.connect(wildfireDbUrl, (wildfireDbError, wildfireDbClient) => {
+                if (wildfireDbError) {
+                    cb(wildfireDbError);
+                } else {
+                    const wildfireDb = wildfireDbClient.db(wildfireDbName);
+                    const wildfireCollection = wildfireDb.collection(wildfireCollectionName);
+                    wildfireCollection.find({}).toArray((queryError, queryResults) => {
+                        if (queryError) {
+                            mapCb(queryError);
+                        } else {
+                            async.map(docs, (doc, mapCb) => {
+                                const eventId = doc["Event"];
+                                const event = queryResults.find(q => q["Event"] == eventId);
+                                if (event) {
+                                    logger.info(`found event '${eventId}'`);
+                                    const size = event["Size"];
+                                    const costs = event["Costs"];
+                                    const features = doc.points
+                                        .map((datum, idx) => {
+                                            const label = idx - COMBINE_CONFIG.units < 0 ?
+                                                `_${COMBINE_CONFIG.units - idx}` : idx - COMBINE_CONFIG.units;
+                                            return COMBINE_CONFIG.props.reduce((acc, prop) => {
+                                                return ({ ...acc, [`${prop}${label}`]: datum[prop] })
+                                            }, {});
+                                        })
+                                        .reduce((acc, obj) => ({ ...acc, ...obj }), {});
+                                    mapCb(null, {
+                                        'Event': eventId,
+                                        ...features,
+                                        'Size': size,
+                                        'Costs': costs
+                                    });
+                                } else {
+                                    mapCb('no event found in wildfire db');
+                                }
+                            }, (mapError, mapResult) => {
+                                if (mapError) {
+                                    cb(mapError);
+                                } else {
+                                    cb(null, mapResult);
+                                }
+                                wildfireDbClient.close();
+                                logger.info('finished map');
+                            });
+                        }
+                    });
+                }
+            });
+        });
+    });
+}
+
+/**
+ * Creates the remote training.training collection from the local training.training collection
+ */
+function uploadWildfirePoints() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "training";
+        const sourceCollectionName = "training";
+        const outputDbUrl = process.env.MONGODB_URL;
+        const outputDbName = "training";
+        const outputCollectionName = "training";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err, res) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+/**
+ * Entry point for the training data combination stage.
+ */
+function combineData() {
+    return new Promise((resolve, reject) => {
+        createFilteredPoints()
+            .then(createWildfirePoints)
+            .then(resolve)
+            .catch(err => {
+                reject(err);
+            });
+    });
+};
 
 module.exports = {
     combineData

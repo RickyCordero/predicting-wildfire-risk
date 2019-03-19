@@ -198,10 +198,131 @@ const getClimateDataEach = (climateConfig) => new Transform({
     }
 });
 
+/**
+ * Downloads and streams climate data for each wildfire from the given source collection into the output collection
+ * @param {Object} query - The mongo query object
+ * @param {String} sourceDbUrl - The mongo url of the source database
+ * @param {String} sourceDbName - The name of the source database
+ * @param {String} sourceCollectionName - The name of the source collection
+ * @param {String} outputDbUrl - The mongo url of the output database
+ * @param {String} outputDbName - The name of the output database
+ * @param {String} outputCollectionName - The name of the output collection
+ * @param {Function} callback - The next function to call
+ */
+const saveClimateData = (query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback) => {
+    MongoClient.connect(sourceDbUrl, (sourceDbError, sourceDbClient) => {
+        if (sourceDbError) {
+            logger.warn('yo, there was an error connecting to the source database');
+            callback(sourceDbError);
+        } else {
+            MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
+                if (outputDbError) {
+                    logger.warn('yo, there was an error connecting to the output database');
+                    callback(outputDbError);
+                } else {
+                    logger.info('connected to the source and output databases successfully');
+                    const sourceDb = sourceDbClient.db(sourceDbName);
+                    const sourceCollection = sourceDb.collection(sourceCollectionName);
+                    const outputDb = outputDbClient.db(outputDbName);
+
+                    const climateOutputDbConfig = {
+                        dbName: outputDbName,
+                        dbURL: outputDbUrl, // unused
+                        dbConnection: outputDb,
+                        batchSize: 50,
+                        collection: outputCollectionName
+                    };
+                    sourceCollection.find(query).toArray((queryError, queryResults) => {
+                        if (queryError) {
+                            callback(queryError);
+                        } else {
+                            async.mapLimit(queryResults, CLIMATE_CONFIG.limit, (item, mapCb) => {
+                                const readStream = streamify([item]);
+                                readStream
+                                    .pipe(getClimateDataEach(CLIMATE_CONFIG))
+                                    .pipe(saveToDBEach(climateOutputDbConfig))
+                                    .on('error', (err) => {
+                                        mapCb(err);
+                                    })
+                                    .on('finish', () => {
+                                        logger.info(`done processing event ${item["Event"]}`);
+                                        mapCb();
+                                    });
+                            }, (mapErr, _mapRes) => {
+                                if (mapErr) {
+                                    callback(mapErr);
+                                } else {
+                                    callback();
+                                }
+                                outputDbClient.close();
+                                sourceDbClient.close();
+                            });
+                        }
+                    });
+                }
+            });
+        }
+    });
+};
+
+/**
+ * Creates the remote climate/training collection from the local climate/training collection using streams
+ */
+function uploadClimateData() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training";
+        const outputDbUrl = process.env.MONGODB_URL;
+        const outputDbName = "climate";
+        const outputCollectionName = "training";
+        MongoClient.connect(sourceDbUrl, (sourceDbError, sourceDbClient) => {
+            if (sourceDbError) {
+                reject(sourceDbError);
+            } else {
+                MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
+                    if (outputDbError) {
+                        reject(outputDbError);
+                    } else {
+                        const sourceDb = sourceDbClient.db(sourceDbName);
+                        const sourceCollection = sourceDb.collection(sourceCollectionName);
+                        const outputDb = outputDbClient.db(outputDbName);
+                        const _outputCollection = outputDb.collection(outputCollectionName);
+
+                        const climateOutputDbConfig = {
+                            dbURL: outputDbUrl, // unused
+                            dbConnection: outputDb,
+                            batchSize: 50,
+                            collection: outputCollectionName
+                        };
+
+                        const writableStream = streamToMongoDB(climateOutputDbConfig);
+
+                        const readStream = sourceCollection.find(query).stream();
+
+                        readStream
+                            .pipe(writableStream)
+                            .on('data', (chunk) => {
+                                logger.info(`processing chunk`);
+                            })
+                            .on('error', (err) => {
+                                logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
+                                reject(err);
+                            })
+                            .on('finish', () => {
+                                logger.info(`saved data to ${outputDbName}/${outputCollectionName} successfully`);
+                                sourceDbClient.close();
+                                outputDbClient.close();
+                                resolve();
+                            });
+                    }
+                })
+            }
+        });
+    });
+}
+
 module.exports = {
-    getHistoricalClimateData,
-    getHistoricalClimateDataEach,
-    getClimateDataInRange,
-    getClimateData,
-    getClimateDataEach
+    saveClimateData
 }

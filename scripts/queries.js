@@ -1,16 +1,5 @@
 const _ = require('lodash');
 
-/**
- * Constructs an 'and' query for all queries in the given object
- * @param {Object} query - The query object
- */
-const andQuery = (query) => ({ $and: Object.values(query) });
-/**
- * Constructs an 'or' query for all queries in the given object
- * @param {Object} query - The query object
- */
-const orQuery = (query) => ({ $or: Object.values(query) });
-
 // 7,956 total "itype" events
 const queryA = {
     // 7,536 total "WF" events
@@ -25,7 +14,6 @@ const queryA = {
     hasAcres: { "acres": { $ne: null } },
     hasCosts: { "ecosts": { $ne: null } }
 };
-
 
 // 26,390 total "inc_type" events
 const queryB = {
@@ -58,7 +46,5 @@ const queryC = {
 module.exports = {
     queryA,
     queryB,
-    queryC,
-    andQuery,
-    orQuery
+    queryC
 };

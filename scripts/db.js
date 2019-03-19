@@ -1,10 +1,11 @@
 const logger = require('./logger');
+
 const _ = require('lodash');
 const MongoClient = require('mongodb').MongoClient;
+const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
+const streamify = require('stream-array');
 
 const { Transform } = require('stream');
-const streamify = require('stream-array');
-const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
 
 const utils = require('./utils');
 
@@ -207,18 +208,38 @@ module.exports.loadSave = (query, sourceDbUrl, sourceDbName, sourceCollectionNam
                             callback(sourceQueryError);
                         } else {
                             const outputDb = outputDbClient.db(outputDbName);
-                            const transformedDocs = transform ? transform(sourceQueryResults) : sourceQueryResults;
-                            module.exports.saveToDBBuffer(outputDb, transformedDocs, outputCollectionName, (saveError, _saveResult) => {
-                                if (saveError) {
-                                    logger.warn(`yo, there was an error saving to ${outputDbName}/${outputCollectionName}`);
-                                    callback(saveError);
-                                } else {
-                                    logger.info(`saved data to ${outputDbName}/${outputCollectionName}`);
-                                    callback();
-                                }
-                                outputDbClient.close();
-                                sourceDbClient.close();
-                            });
+                            if (transform) {
+                                transform(sourceQueryResults, (err, transformedDocs) => {
+                                    if (err) {
+                                        callback(err);
+                                    } else {
+                                        logger.info('attempting to save to db now');
+                                        module.exports.saveToDBBuffer(outputDb, transformedDocs, outputCollectionName, (saveError, _saveResult) => {
+                                            if (saveError) {
+                                                logger.warn(`yo, there was an error saving to ${outputDbName}/${outputCollectionName}`);
+                                                callback(saveError);
+                                            } else {
+                                                logger.info(`saved data to ${outputDbName}/${outputCollectionName}`);
+                                                callback();
+                                            }
+                                            outputDbClient.close();
+                                            sourceDbClient.close();
+                                        });
+                                    }
+                                });
+                            } else {
+                                module.exports.saveToDBBuffer(outputDb, sourceQueryResults, outputCollectionName, (saveError, _saveResult) => {
+                                    if (saveError) {
+                                        logger.warn(`yo, there was an error saving to ${outputDbName}/${outputCollectionName}`);
+                                        callback(saveError);
+                                    } else {
+                                        logger.info(`saved data to ${outputDbName}/${outputCollectionName}`);
+                                        callback();
+                                    }
+                                    outputDbClient.close();
+                                    sourceDbClient.close();
+                                });
+                            }
                         }
                     });
                 }

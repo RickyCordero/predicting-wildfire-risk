@@ -9,7 +9,7 @@ const moment = require('moment-timezone');
 
 const { saveToDBBuffer, loadSave } = require('./db');
 const { dateComparator, filterMaxInfo } = require('./utils');
-const { queryA, queryB, queryC, andQuery, orQuery } = require('./queries');
+const { queryA, queryB, queryC } = require('./queries');
 
 const FEATURES_A = ["startdate", "ename", "latdd", "longdd", "un_ustate", "acres", "ecosts", "event_id"];
 const FEATURES_B = ["start_date", "start_hour", "fire_name", "latitude", "longitude", "state", "area_", "area_meas", "incident_n"];
@@ -17,6 +17,7 @@ const FEATURES_C = ["firediscoverydatetime", "incidentname", "latitude", "longit
 
 /**
  * Downloads raw wildfire data from the ArcGIS REST API from 2002 to 2018
+ * and saves it to the local arcgis.raw collection
  * https://rmgsc-haws1.cr.usgs.gov/arcgis/sdk/rest/index.html#//02ss0000006v000000
  * id=26 => 2002
  * id=25 => 2003
@@ -70,7 +71,7 @@ function downloadRaw() {
 }
 
 /**
- * Creates the local arcgis/events collection from the local arcgis/raw collection
+ * Creates the local arcgis.events collection from the local arcgis.raw collection
  */
 function createEventsFromRaw() {
     return new Promise((resolve, reject) => {
@@ -87,17 +88,17 @@ function createEventsFromRaw() {
             } else {
                 resolve();
             }
-        }, (docs) => {
-            return docs.reduce((acc, obj) => {
+        }, (docs, cb) => {
+            cb(null, docs.reduce((acc, obj) => {
                 const rows = obj.features.map(f => f.attributes);
                 return acc.concat(rows);
-            }, []);
+            }, []));
         });
     });
 }
 
 /**
- * Creates the local arcgis/unique collection from the local arcgis/events collection
+ * Creates the local arcgis.unique collection from the local arcgis.events collection
  */
 function createUniqueFromEvents() {
     return new Promise((resolve, reject) => {
@@ -114,8 +115,8 @@ function createUniqueFromEvents() {
             } else {
                 resolve();
             }
-        }, (docs) => {
-            return filterMaxInfo(docs, (doc) => {
+        }, (docs, cb) => {
+            cb(null, filterMaxInfo(docs, (doc) => {
                 if (doc["itype"]) {
                     return JSON.stringify(_.pick(doc, ["event_id"]));
                 } else if (doc["inc_type"]) {
@@ -124,7 +125,7 @@ function createUniqueFromEvents() {
                     return JSON.stringify(_.pick(doc, ["uniquefireidentifier"]));
                 }
                 return JSON.stringify(doc); // shouldn't happen
-            });
+            }));
         });
     });
 }
@@ -146,8 +147,7 @@ function createUniqueView(query, outputDbUrl, outputDbName, outputCollectionName
 }
 
 /**
- * Creates the local arcgis/wildfires collection from the local arcgis/events collection
- * where each document represents a wildfire event
+ * Creates the local arcgis.wildfires collection from the local arcgis.events collection
  */
 function createWildfiresFromUnique() {
     return new Promise((resolve, reject) => {
@@ -188,7 +188,7 @@ function createWildfireView(query, outputDbUrl, outputDbName, outputCollectionNa
 }
 
 /**
- * Creates the local arcgis/standardized collection from the local arcgis/wildfires collection
+ * Creates the local arcgis.standardized collection from the local arcgis.wildfires collection
  * where each document represents a wildfire event, each document has uniform key names for a base 
  * set of keys defined in each processDoc function
  */
@@ -243,7 +243,6 @@ function createStandardizedView(query, outputDbUrl, outputDbName, outputCollecti
  * @param {Object} doc - The wildfire event object
  */
 function processDocA(doc) {
-    // if a key from FEATURES_A is not contained in doc, lodash safely does not write the key to picked
     const picked = _.pick(doc, FEATURES_A);
     return {
         ..._.omit(doc, FEATURES_A),
@@ -353,7 +352,7 @@ function processDateC(datetime, latitude, longitude) {
 }
 
 /**
- * Uploads the arcgis/raw, arcgis/events, arcgis/unique, arcgis/wildfires, and arcgis/standardized collections to the remote database
+ * Uploads the arcgis.raw, arcgis.events, arcgis.unique, arcgis.wildfires, and arcgis.standardized collections to the remote database
  */
 function upload() {
     const sourceDbUrl = "mongodb://localhost:27017";
@@ -376,35 +375,25 @@ function upload() {
     return Promise.all(sourceCollectionNames.map(promisify));
 }
 
-function main() {
-    const s = process.hrtime();
-    downloadRaw()
-        .then(() => {
-            return createEventsFromRaw();
-        })
-        .then(() => {
-            return createUniqueFromEvents();
-        })
-        .then(() => {
-            return createWildfiresFromUnique();
-        })
-        .then(() => {
-            return createStandardizedWildfires();
-        })
-        .then(() => {
-            return upload();
-        })
-        .then(() => {
-            logger.info(process.hrtime(s).join('.') + " seconds elapsed");
-        })
-        .catch(err => {
-            logger.debug(err);
-        });
+/**
+ * Entry point for the wildfire data collection stage.
+ */
+function collectWildfireData() {
+    return new Promise((resolve, reject) => {
+        downloadRaw()
+            .then(createEventsFromRaw)
+            .then(createUniqueFromEvents)
+            .then(createWildfiresFromUnique)
+            .then(createStandardizedWildfires)
+            .then(resolve)
+            .catch(err => {
+                reject(err);
+            });
+    });
 }
 
-// main();
-
 module.exports = {
+    collectWildfireData,
     createUniqueView,
     createWildfireView,
     createStandardizedView
