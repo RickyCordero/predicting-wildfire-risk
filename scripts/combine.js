@@ -194,7 +194,7 @@ function createFilteredPoints() { // uses buffer
         const sourceCollectionName = "training";
         const outputDbUrl = "mongodb://localhost:27017";
         const outputDbName = "climate";
-        const outputCollectionName = "filteredPoints";
+        const outputCollectionName = "filteredPoints2";
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
@@ -202,11 +202,105 @@ function createFilteredPoints() { // uses buffer
                 resolve();
             }
         }, (docs, cb) => {
-            cb(null, docs
-                .map(transformClimateDatum)
-                .filter((doc) => {
-                    return doc.points.length == 696;
-                }));
+            cb(null, docs.filter(d => {
+                const r = !d.error;
+                if (!r) {
+                    logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
+                }
+                return r;
+            }).map(transformClimateDatum));
+        });
+    });
+}
+
+/**
+ * Creates the training.training collection from the climate.filteredPoints collection
+ */
+function createWildfirePoints2() { // uses buffer
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "filteredPoints2";
+
+        const wildfireDbUrl = "mongodb://localhost:27017";
+        const wildfireDbName = "arcgis";
+        const wildfireCollectionName = "training"
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "training2";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            MongoClient.connect(wildfireDbUrl, (wildfireDbError, wildfireDbClient) => {
+                if (wildfireDbError) {
+                    cb(wildfireDbError);
+                } else {
+                    const wildfireDb = wildfireDbClient.db(wildfireDbName);
+                    const wildfireCollection = wildfireDb.collection(wildfireCollectionName);
+                    wildfireCollection.find({}).toArray((queryError, queryResults) => {
+                        if (queryError) {
+                            logger.warn(`yo, there was a query error`);
+                            cb(queryError);
+                        } else {
+                            const res = [];
+                            for (let i = 0; i < docs.length; i++) {
+                                const doc = docs[i];
+
+                                // for each climate doc, find the matching wildfire event
+                                for (let j = 0; j < queryResults.length; j++) {
+                                    const event = queryResults[j];
+                                    if (event["Event"] == doc["Event"]) {
+                                        // logger.info(`processing event '${event["Event"]}'`);
+                                        console.log(`processing event '${event["Event"]}'`);
+                                        // pick out features from wildfire event to include
+                                        const eventId = event["Event"];
+                                        const latitude = event["Latitude"];
+                                        const longitude = event["Longitude"];
+                                        const features = {};
+                                        for (let k = 0; k < doc.points.length; k++) {
+                                            const point = doc.points[k];
+                                            const props = Object.keys(point);
+                                            for (let m = 0; m < props.length; m++) {
+                                                const prop = props[m];
+                                                console.log(i, j, k, m);
+                                                if (props != "time") {
+                                                    if (!features[prop]) {
+                                                        features[prop] = [];
+                                                    }
+                                                    features[prop].push({
+                                                        time: point["time"],
+                                                        [prop]: point[prop]
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        const size = event["Size"];
+                                        const costs = event["Costs"];
+                                        res.push({
+                                            'Event': eventId,
+                                            'Latitude': latitude,
+                                            'Longitude': longitude,
+                                            'Features': features,
+                                            'Size': size,
+                                            'Costs': costs
+                                        });
+                                        console.log('finished creating training object');
+                                        break;
+                                    }
+                                }
+                            }
+                            console.log('finished transforming queryResults');
+                            cb(null, res);
+                        }
+                    });
+                }
+            });
         });
     });
 }
@@ -219,7 +313,7 @@ function createWildfirePoints() { // uses buffer
         const query = {};
         const sourceDbUrl = "mongodb://localhost:27017";
         const sourceDbName = "climate";
-        const sourceCollectionName = "filteredPoints";
+        const sourceCollectionName = "filteredPoints2";
 
         const wildfireDbUrl = "mongodb://localhost:27017";
         const wildfireDbName = "arcgis";
@@ -227,7 +321,8 @@ function createWildfirePoints() { // uses buffer
 
         const outputDbUrl = "mongodb://localhost:27017";
         const outputDbName = "training";
-        const outputCollectionName = "training";
+        const outputCollectionName = "training3";
+
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
@@ -245,40 +340,32 @@ function createWildfirePoints() { // uses buffer
                         if (queryError) {
                             mapCb(queryError);
                         } else {
-                            async.map(docs, (doc, mapCb) => {
-                                const eventId = doc["Event"];
-                                const event = queryResults.find(q => q["Event"] == eventId);
+                            for (let i = 0; i < docs.length; i++) {
+                                const doc = docs[i];
+                                const event = queryResults.find(q => q["Event"] == doc["Event"]);
+                                const ret = { "Event": doc["Event"] };
                                 if (event) {
-                                    logger.info(`found event '${eventId}'`);
-                                    const size = event["Size"];
-                                    const costs = event["Costs"];
-                                    const features = doc.points
-                                        .map((datum, idx) => {
-                                            const label = idx - COMBINE_CONFIG.units < 0 ?
-                                                `_${COMBINE_CONFIG.units - idx}` : idx - COMBINE_CONFIG.units;
-                                            return COMBINE_CONFIG.props.reduce((acc, prop) => {
-                                                return ({ ...acc, [`${prop}${label}`]: datum[prop] })
-                                            }, {});
-                                        })
-                                        .reduce((acc, obj) => ({ ...acc, ...obj }), {});
-                                    mapCb(null, {
-                                        'Event': eventId,
-                                        ...features,
-                                        'Size': size,
-                                        'Costs': costs
-                                    });
-                                } else {
-                                    mapCb('no event found in wildfire db');
+                                    // logger.info(`found event '${doc["Event"]}'`);
+
+                                    // populate climate feature columns
+                                    for (let j = 0; j < doc.points.length; j++) {
+                                        const point = doc.points[j];
+                                        const label = j - COMBINE_CONFIG.units < 0 ?
+                                            `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                                        const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point);
+                                        for (let k = 0; k < props.length; k++) {
+                                            const prop = props[k];
+                                            console.log(i, j, k);
+                                            ret[`${prop}${label}`] = point[prop];
+                                        }
+                                    }
+                                    // get other features
+                                    ret["Size"] = event["Size"];
+                                    ret["Costs"] = event["Costs"];
                                 }
-                            }, (mapError, mapResult) => {
-                                if (mapError) {
-                                    cb(mapError);
-                                } else {
-                                    cb(null, mapResult);
-                                }
-                                wildfireDbClient.close();
-                                logger.info('finished map');
-                            });
+                                docs[i] = ret;
+                            }
+                            cb(null, docs);
                         }
                     });
                 }
@@ -287,35 +374,15 @@ function createWildfirePoints() { // uses buffer
     });
 }
 
-/**
- * Creates the remote training.training collection from the local training.training collection
- */
-function uploadWildfirePoints() {
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
-        const sourceDbName = "training";
-        const sourceCollectionName = "training";
-        const outputDbUrl = process.env.MONGODB_URL;
-        const outputDbName = "training";
-        const outputCollectionName = "training";
-        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err, res) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        });
-    });
-}
 
 /**
  * Entry point for the training data combination stage.
  */
 function combineData() {
     return new Promise((resolve, reject) => {
-        createFilteredPoints()
-            .then(createWildfirePoints)
+        // createFilteredPoints()
+        // .then(createWildfirePoints)
+        createWildfirePoints()
             .then(resolve)
             .catch(err => {
                 reject(err);

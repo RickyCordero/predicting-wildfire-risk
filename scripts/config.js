@@ -27,7 +27,7 @@ const CLIMATE_CONFIG = {
 
 const COMBINE_CONFIG = {
     units: CLIMATE_CONFIG.units,
-    props: ['temperature', 'windSpeed', 'humidity']
+    // props: ['temperature', 'windSpeed', 'humidity']
 };
 
 module.exports = {
