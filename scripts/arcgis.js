@@ -1,5 +1,6 @@
 const logger = require('./logger');
 
+const fs = require('fs');
 const async = require('async');
 const request = require('request');
 const _ = require('lodash');
@@ -7,7 +8,11 @@ const MongoClient = require('mongodb').MongoClient;
 const tzlookup = require('tz-lookup');
 const moment = require('moment-timezone');
 
-const { saveToDBBuffer, loadSave } = require('./db');
+const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
+const streamify = require('stream-array');
+
+const { WILDFIRE_CONFIG } = require('./config');
+const { saveToDBBuffer, loadSave, streamSave } = require('./db');
 const { dateComparator, filterMaxInfo } = require('./utils');
 const { queryA, queryB, queryC } = require('./queries');
 
@@ -392,9 +397,234 @@ function collectWildfireData() {
     });
 }
 
+/**
+ * Entry point for the wildfire training data filtering stage.
+ * Creates the local arcgis.training collection from the local arcgis.standardized collection.
+ */
+function createTrainingWildfires() {
+    return new Promise((resolve, reject) => {
+        const query = WILDFIRE_CONFIG.query;
+        const outputDbUrl = WILDFIRE_CONFIG.outputDbUrl;
+        const outputDbName = WILDFIRE_CONFIG.outputDbName;
+        const outputCollectionName = WILDFIRE_CONFIG.outputCollectionName;
+        createStandardizedView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, WILDFIRE_CONFIG.transform);
+    });
+}
+
+function createTrainingWildfiresMap() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "arcgis";
+        const sourceCollectionName = "training";
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "arcgis";
+        const outputCollectionName = "map";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            const res = {};
+            for (let i = 0; i < docs.length; i++) {
+                console.log(i);
+                const doc = docs[i];
+                const eventId = doc["Event"];
+                if (!res[eventId]) {
+                    res[eventId] = {};
+                }
+                res[eventId] = _.omit(doc, "Event");
+            }
+            cb(null, [res]);
+        });
+    });
+}
+
+/**
+ * Creates the arcgis.nonfire collection by loading the nonfire JSON
+ */
+function createNonFireEvents() {
+    return new Promise((resolve, reject) => {
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "arcgis";
+        const outputCollectionName = "nonfire";
+        MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
+            if (outputDbError) {
+                reject(outputDbError);
+            } else {
+                const outputDb = outputDbClient.db(outputDbName);
+
+                const nonfireOutputDbConfig = {
+                    dbURL: outputDbUrl, // unused
+                    dbConnection: outputDb,
+                    batchSize: 50,
+                    collection: outputCollectionName
+                };
+
+                const writableStream = streamToMongoDB(nonfireOutputDbConfig);
+
+                loadNonFireJSON()
+                    .then(json => {
+                        json = json.map((event, idx) => ({ ...event, "Event": `NONFIRE_${idx}` }));
+                        const readStream = streamify(json);
+                        readStream
+                            .pipe(writableStream)
+                            .on('data', (chunk) => {
+                                logger.info(`processing chunk`);
+                            })
+                            .on('error', (err) => {
+                                logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
+                                reject(err);
+                            })
+                            .on('finish', () => {
+                                logger.info(`saved data to ${outputDbName}/${outputCollectionName} successfully`);
+                                outputDbClient.close();
+                                resolve();
+                            });
+                    })
+                    .catch(reject);
+            }
+        });
+    });
+}
+
+/**
+ * Creates the arcgis.nonfire collection by loading the nonfire JSON
+ */
+function createRahulNonFireEvents() {
+    return new Promise((resolve, reject) => {
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "arcgis";
+        const outputCollectionName = "nonfireRahul";
+        MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
+            if (outputDbError) {
+                reject(outputDbError);
+            } else {
+                const outputDb = outputDbClient.db(outputDbName);
+
+                const nonfireOutputDbConfig = {
+                    dbURL: outputDbUrl, // unused
+                    dbConnection: outputDb,
+                    batchSize: 50,
+                    collection: outputCollectionName
+                };
+
+                const writableStream = streamToMongoDB(nonfireOutputDbConfig);
+
+                const startIndex = 1000;
+
+                loadRahulNonFireJSON()
+                    .then(json => {
+                        json = json.map((event, idx) => ({ ...event, "Event": `NONFIRE_${idx + startIndex}` }));
+                        const readStream = streamify(json);
+                        readStream
+                            .pipe(writableStream)
+                            .on('data', (chunk) => {
+                                logger.info(`processing chunk`);
+                            })
+                            .on('error', (err) => {
+                                logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
+                                reject(err);
+                            })
+                            .on('finish', () => {
+                                logger.info(`saved data to ${outputDbName}/${outputCollectionName} successfully`);
+                                outputDbClient.close();
+                                resolve();
+                            });
+                    })
+                    .catch(reject);
+            }
+        });
+    });
+}
+
+/**
+ * Creates the arcgis.nonfireAll collection from the arcgis.nonfire 
+ * and arcgis.nonfireRahul collections
+ */
+function combineAllNonFireEvents() {
+    return new Promise((resolve, reject) => {
+        const query_1 = {};
+        const projection_1 = {};
+
+        const query_2 = {};
+        const projection_2 = {};
+
+        const sourceDbUrl_1 = "mongodb://localhost:27017";
+        const sourceDbName_1 = "arcgis";
+        const sourceCollectionName_1 = "nonfire";
+
+        const sourceDbUrl_2 = "mongodb://localhost:27017";
+        const sourceDbName_2 = "arcgis";
+        const sourceCollectionName_2 = "nonfireRahul";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "arcgis";
+        const outputCollectionName = "nonfireAll";
+
+        // stream the documents from the first collection to the output database
+        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
+            if (err_1) {
+                reject(err_1);
+            } else {
+                // stream the documents from the second collection to the output database
+                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
+                    if (err_2) {
+                        reject(err_2);
+                    } else {
+                        resolve();
+                    }
+                }, (doc, cb) => {
+                    cb(null, doc);
+                });
+            }
+        }, (doc, cb) => {
+            cb(null, doc);
+        });
+    });
+}
+
+
+function loadNonFireJSON() {
+    return new Promise((resolve, reject) => {
+        const content = fs.readFileSync("C:\\Users\\Ricky\\Documents\\MATH 4025 Applied Math Capstone\\predicting-wildfire-risk\\data\\non-fire-events.json");
+        const json = JSON.parse(content);
+        console.log(typeof (json));
+        console.log(JSON.stringify(json, null, 4));
+        resolve(json);
+    });
+}
+
+function loadRahulNonFireJSON() {
+    return new Promise((resolve, reject) => {
+        const content = fs.readFileSync("C:\\Users\\Ricky\\Documents\\MATH 4025 Applied Math Capstone\\predicting-wildfire-risk\\data\\non-fire-NEW-Rahul-validation.json");
+        const json = JSON.parse(content);
+        console.log(typeof (json));
+        console.log(JSON.stringify(json, null, 4));
+        resolve(json);
+    });
+}
+
+function wildfireStages() {
+    return new Promise((resolve, reject) => {
+        // collectWildfireData()
+        createRahulNonFireEvents()
+        // combineAllNonFireEvents()
+            .then(resolve)
+            .catch(err => {
+                reject(err);
+            });
+    });
+}
+
 module.exports = {
-    collectWildfireData,
-    createUniqueView,
-    createWildfireView,
-    createStandardizedView
+    wildfireStages
 }

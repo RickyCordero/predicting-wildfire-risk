@@ -1,11 +1,14 @@
 const logger = require('./logger');
 
+const _ = require('lodash');
 const async = require('async');
 const MongoClient = require('mongodb').MongoClient;
 const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
 const { Transform } = require('stream');
 const { COMBINE_CONFIG } = require('./config');
-const { loadSave } = require('./db');
+const { loadSave, loadTransform, streamSave, streamTransform } = require('./db');
+const { binarySearch } = require('./utils');
+
 
 /*
     Sample Dark Sky Time Machine response object at the 'daily' interval (with time transformation):
@@ -102,6 +105,8 @@ function transformClimateDatum(datum) {
      */
     const res = {
         "Event": datum["Event"],
+        "Latitude": datum["latitude"],
+        "Longitude": datum["longitude"],
         points: []
     };
     let key;
@@ -111,6 +116,10 @@ function transformClimateDatum(datum) {
         key = "daily";
     }
     const objects = datum[key];
+    if (objects.length == 1) {
+        logger.warn("I think I found a missing event:")
+        logger.warn(datum["Event"]);
+    }
     if (objects) {
         res.points = objects.reduce((points, dayObj) => {
             if (dayObj[key]) {
@@ -124,252 +133,772 @@ function transformClimateDatum(datum) {
     return res;
 }
 
-const transformClimateDatumStream = (transformChunk) => new Transform({
-    readableObjectMode: true, // pass an object
-    writableObjectMode: true, // read an object
-    transform(chunk, _encoding, callback) {
-        const transformedDatum = transformChunk(chunk);
-        this.push(transformedDatum);
-        callback();
-    }
-});
-
-function createClimateStreamView(query, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, cb, transform) {
-    const sourceDbUrl = "mongodb://localhost:27017";
-    const sourceDbName = "climate";
-    MongoClient.connect(sourceDbUrl, (sourceDbError, sourceDbClient) => {
-        if (sourceDbError) {
-            logger.warn('yo, there was an error connecting to the local database');
-            cb(sourceDbError);
-        } else {
-            MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
-                if (outputDbError) {
-                    logger.warn('yo, there was an error connecting to the local database');
-                    cb(outputDbError);
-                } else {
-                    const sourceDb = sourceDbClient.db(sourceDbName);
-                    const sourceCollection = sourceDb.collection(sourceCollectionName);
-                    const outputDb = outputDbClient.db(outputDbName);
-
-                    const processedClimateOutputDbConfig = {
-                        dbURL: "",
-                        dbConnection: outputDb,
-                        batchSize: 50,
-                        collection: outputCollectionName
-                    };
-
-                    const readStream = sourceCollection.find(query).stream();
-                    const writeStream = streamToMongoDB(processedClimateOutputDbConfig);
-
-                    readStream
-                        .pipe(transformClimateDatumStream(transform))
-                        .pipe(writeStream)
-                        .on('data', (chunk) => {
-                            logger.info('processing chunk');
-                        })
-                        .on('error', (err) => {
-                            logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
-                            cb(err);
-                        })
-                        .on('finish', () => {
-                            logger.info('finished cleaning climate data');
-                            sourceDbClient.close();
-                            outputDbClient.close();
-                            cb();
-                        });
-                }
-            });
-        }
-    });
-}
 
 /**
  * Creates the climate.filteredPoints collection from the climate.training collection
  */
-function createFilteredPoints() { // uses buffer
+function createClimateTraining2() { // uses streams
     return new Promise((resolve, reject) => {
         const query = {};
+        const projection = {};
         const sourceDbUrl = "mongodb://localhost:27017";
         const sourceDbName = "climate";
         const sourceCollectionName = "training";
+
         const outputDbUrl = "mongodb://localhost:27017";
         const outputDbName = "climate";
-        const outputCollectionName = "filteredPoints2";
-        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (docs, cb) => {
-            cb(null, docs.filter(d => {
-                const r = !d.error;
-                if (!r) {
-                    logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
-                }
-                return r;
-            }).map(transformClimateDatum));
-        });
-    });
-}
-
-/**
- * Creates the training.training collection from the climate.filteredPoints collection
- */
-function createWildfirePoints2() { // uses buffer
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
-        const sourceDbName = "climate";
-        const sourceCollectionName = "filteredPoints2";
-
-        const wildfireDbUrl = "mongodb://localhost:27017";
-        const wildfireDbName = "arcgis";
-        const wildfireCollectionName = "training"
-
-        const outputDbUrl = "mongodb://localhost:27017";
-        const outputDbName = "training";
         const outputCollectionName = "training2";
-        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
             } else {
                 resolve();
             }
-        }, (docs, cb) => {
-            MongoClient.connect(wildfireDbUrl, (wildfireDbError, wildfireDbClient) => {
-                if (wildfireDbError) {
-                    cb(wildfireDbError);
-                } else {
-                    const wildfireDb = wildfireDbClient.db(wildfireDbName);
-                    const wildfireCollection = wildfireDb.collection(wildfireCollectionName);
-                    wildfireCollection.find({}).toArray((queryError, queryResults) => {
-                        if (queryError) {
-                            logger.warn(`yo, there was a query error`);
-                            cb(queryError);
-                        } else {
-                            const res = [];
-                            for (let i = 0; i < docs.length; i++) {
-                                const doc = docs[i];
+        }, (doc, cb) => {
+            if (doc.error) {
+                logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
+                cb(doc.error);
+            } else {
+                cb(null, transformClimateDatum(doc));
+            }
+        });
+    });
+}
 
-                                // for each climate doc, find the matching wildfire event
-                                for (let j = 0; j < queryResults.length; j++) {
-                                    const event = queryResults[j];
-                                    if (event["Event"] == doc["Event"]) {
-                                        // logger.info(`processing event '${event["Event"]}'`);
-                                        console.log(`processing event '${event["Event"]}'`);
-                                        // pick out features from wildfire event to include
-                                        const eventId = event["Event"];
-                                        const latitude = event["Latitude"];
-                                        const longitude = event["Longitude"];
-                                        const features = {};
-                                        for (let k = 0; k < doc.points.length; k++) {
-                                            const point = doc.points[k];
-                                            const props = Object.keys(point);
-                                            for (let m = 0; m < props.length; m++) {
-                                                const prop = props[m];
-                                                console.log(i, j, k, m);
-                                                if (props != "time") {
-                                                    if (!features[prop]) {
-                                                        features[prop] = [];
-                                                    }
-                                                    features[prop].push({
-                                                        time: point["time"],
-                                                        [prop]: point[prop]
-                                                    });
-                                                }
-                                            }
-                                        }
-                                        const size = event["Size"];
-                                        const costs = event["Costs"];
-                                        res.push({
-                                            'Event': eventId,
-                                            'Latitude': latitude,
-                                            'Longitude': longitude,
-                                            'Features': features,
-                                            'Size': size,
-                                            'Costs': costs
-                                        });
-                                        console.log('finished creating training object');
-                                        break;
-                                    }
-                                }
-                            }
-                            console.log('finished transforming queryResults');
-                            cb(null, res);
-                        }
-                    });
+/**
+ * Creates the training.training collection from the climate.training2 collection
+ */
+function createTrainingTraining() { // uses streams
+    return new Promise((resolve, reject) => {
+        const climateQuery = {};
+        const climateProjection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training2";
+
+        const wildfireQuery = {};
+        const wildfireProjection = {};
+        const wildfireDbUrl = "mongodb://localhost:27017";
+        const wildfireDbName = "arcgis";
+        const wildfireCollectionName = "map";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "training";
+        loadTransform(wildfireQuery, wildfireProjection, wildfireDbUrl, wildfireDbName, wildfireCollectionName, (transformError) => {
+            if (transformError) {
+                reject(transformError);
+            } else {
+                resolve();
+            }
+        }, (docs, loadTransformCallback) => {
+            const wildfireMap = docs[0];
+            streamSave(climateQuery, climateProjection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+                if (err) {
+                    loadTransformCallback(err);
+                } else {
+                    loadTransformCallback();
                 }
+            }, (doc, cb) => {
+                const res = {};
+                res["Event"] = doc["Event"];
+                res["Latitude"] = doc["Latitude"];
+                res["Longitude"] = doc["Longitude"];
+                // populate climate feature columns
+                for (let j = 0; j < doc.points.length; j++) {
+                    const point = doc.points[j];
+                    const label = j - COMBINE_CONFIG.units < 0 ?
+                        `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                    const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k != "time" && k != "icon");
+                    for (let k = 0; k < props.length; k++) {
+                        const prop = props[k];
+                        res[`${prop}${label}`] = point[prop];
+                    }
+                }
+                // set other features
+                res["Size"] = wildfireMap[doc["Event"]]["Size"];
+                res["Costs"] = wildfireMap[doc["Event"]]["Costs"];
+                cb(null, res);
+                console.log('finished transforming doc');
             });
         });
     });
 }
 
 /**
- * Creates the training.training collection from the climate.filteredPoints collection
+ * Creates the training.training collection from the climate.training2 collection
  */
-function createWildfirePoints() { // uses buffer
+function createTrainingReduced() { // uses streams
     return new Promise((resolve, reject) => {
-        const query = {};
+        const climateQuery = {};
+        const climateProjection = {};
+
         const sourceDbUrl = "mongodb://localhost:27017";
         const sourceDbName = "climate";
-        const sourceCollectionName = "filteredPoints2";
+        const sourceCollectionName = "training2";
 
+        const wildfireQuery = {};
+        const wildfireProjection = {};
         const wildfireDbUrl = "mongodb://localhost:27017";
         const wildfireDbName = "arcgis";
-        const wildfireCollectionName = "training"
+        const wildfireCollectionName = "map";
 
         const outputDbUrl = "mongodb://localhost:27017";
         const outputDbName = "training";
-        const outputCollectionName = "training3";
+        const outputCollectionName = "trainingReduced";
+        loadTransform(wildfireQuery, wildfireProjection, wildfireDbUrl, wildfireDbName, wildfireCollectionName, (transformError) => {
+            if (transformError) {
+                reject(transformError);
+            } else {
+                resolve();
+            }
+        }, (docs, loadTransformCallback) => {
+            const wildfireMap = docs[0];
+            streamSave(climateQuery, climateProjection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+                if (err) {
+                    loadTransformCallback(err);
+                } else {
+                    loadTransformCallback();
+                }
+            }, (doc, cb) => {
+                const res = {};
+                res["Event"] = doc["Event"];
+                res["Latitude"] = doc["Latitude"];
+                res["Longitude"] = doc["Longitude"];
+                // populate climate feature columns
+                for (let j = 0; j < doc.points.length; j++) {
+                    const point = doc.points[j];
+                    const label = j - COMBINE_CONFIG.units < 0 ?
+                        `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                    const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k == "temperature" || k == "humidity" || k == "windSpeed");
+                    for (let k = 0; k < props.length; k++) {
+                        const prop = props[k];
+                        res[`${prop}${label}`] = point[prop];
+                    }
+                }
+                // set other features
+                res["Size"] = wildfireMap[doc["Event"]]["Size"];
+                res["Costs"] = wildfireMap[doc["Event"]]["Costs"];
+                cb(null, res);
+                console.log('finished transforming doc');
+            });
+        });
+    });
+}
 
-        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+/**
+ * Creates the training.trainingFormat2 collection from the climate.training2 collection
+ */
+function createTrainingTrainingFormat2() { // uses streams
+    return new Promise((resolve, reject) => {
+        const climateQuery = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training2";
+
+        const wildfireQuery = {};
+        const wildfireProjection = {};
+        const wildfireDbUrl = "mongodb://localhost:27017";
+        const wildfireDbName = "arcgis";
+        const wildfireCollectionName = "map";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "trainingFormat2";
+        loadTransform(wildfireQuery, wildfireProjection, wildfireDbUrl, wildfireDbName, wildfireCollectionName, (transformError) => {
+            if (transformError) {
+                reject(transformError);
+            } else {
+                resolve();
+            }
+        }, (docs, loadTransformCallback) => {
+            const wildfireMap = docs[0];
+            streamSave(climateQuery, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+                if (err) {
+                    loadTransformCallback(err);
+                } else {
+                    loadTransformCallback();
+                }
+            }, (doc, cb) => {
+                console.log(`processing event '${doc["Event"]}'`);
+                console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
+                // pick out features from wildfire event to include
+                const eventId = doc["Event"];
+                const latitude = doc["Latitude"];
+                const longitude = doc["Longitude"];
+                const features = {};
+                for (let k = 0; k < doc.points.length; k++) {
+                    const point = doc.points[k];
+                    const props = Object.keys(point).filter(k => k != "time" && k != "icon");
+                    for (let m = 0; m < props.length; m++) {
+                        const prop = props[m];
+                        if (!features[prop]) {
+                            features[prop] = [];
+                        }
+                        features[prop].push({
+                            time: point["time"],
+                            [prop]: point[prop]
+                        });
+                    }
+                }
+                const size = wildfireMap[doc["Event"]]["Size"];
+                const costs = wildfireMap[doc["Event"]]["Costs"];
+                const res = {
+                    'Event': eventId,
+                    'Latitude': latitude,
+                    'Longitude': longitude,
+                    'Features': features,
+                    'Size': size,
+                    'Costs': costs
+                };
+                cb(null, res);
+                console.log('finished transforming doc');
+            });
+        });
+    });
+}
+
+/**
+ * Creates the climate.nonfire2 collection from the climate.nonfire collection
+ */
+function createClimateNonFire2() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfire";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "nonfire2";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
             } else {
                 resolve();
             }
-        }, (docs, cb) => {
-            MongoClient.connect(wildfireDbUrl, (wildfireDbError, wildfireDbClient) => {
-                if (wildfireDbError) {
-                    cb(wildfireDbError);
-                } else {
-                    const wildfireDb = wildfireDbClient.db(wildfireDbName);
-                    const wildfireCollection = wildfireDb.collection(wildfireCollectionName);
-                    wildfireCollection.find({}).toArray((queryError, queryResults) => {
-                        if (queryError) {
-                            mapCb(queryError);
-                        } else {
-                            for (let i = 0; i < docs.length; i++) {
-                                const doc = docs[i];
-                                const event = queryResults.find(q => q["Event"] == doc["Event"]);
-                                const ret = { "Event": doc["Event"] };
-                                if (event) {
-                                    // logger.info(`found event '${doc["Event"]}'`);
+        }, (doc, cb) => {
+            if (doc.error) {
+                logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
+            }
+            cb(null, transformClimateDatum(doc));
+        });
+    });
+}
 
-                                    // populate climate feature columns
-                                    for (let j = 0; j < doc.points.length; j++) {
-                                        const point = doc.points[j];
-                                        const label = j - COMBINE_CONFIG.units < 0 ?
-                                            `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
-                                        const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point);
-                                        for (let k = 0; k < props.length; k++) {
-                                            const prop = props[k];
-                                            console.log(i, j, k);
-                                            ret[`${prop}${label}`] = point[prop];
-                                        }
-                                    }
-                                    // get other features
-                                    ret["Size"] = event["Size"];
-                                    ret["Costs"] = event["Costs"];
-                                }
-                                docs[i] = ret;
-                            }
-                            cb(null, docs);
-                        }
+/**
+ * Creates the climate.nonfireRahul2 collection from the climate.nonfireRahul collection
+ */
+function createClimateRahulNonFire2() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfireRahul";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "nonfireRahul2";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+            if (doc.error) {
+                logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
+            }
+            cb(null, transformClimateDatum(doc));
+        });
+    });
+}
+
+/**
+ * Creates the training.nonfire collection from the climate.nonfire2 collection
+ */
+function createTrainingNonFire() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfire2";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "nonfire";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+
+            console.log(`processing event '${doc["Event"]}'`);
+            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
+
+            const res = {};
+            res["Event"] = doc["Event"];
+            res["Latitude"] = doc["Latitude"];
+            res["Longitude"] = doc["Longitude"];
+            // populate climate feature columns
+            for (let j = 0; j < doc.points.length; j++) {
+                const point = doc.points[j];
+                const label = j - COMBINE_CONFIG.units < 0 ?
+                    `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k != "time" && k != "icon");
+                for (let k = 0; k < props.length; k++) {
+                    const prop = props[k];
+                    res[`${prop}${label}`] = point[prop];
+                }
+            }
+            // set other features
+            res["Size"] = 0;
+            res["Costs"] = 0;
+            console.log('finished transforming doc');
+            cb(null, res);
+        });
+    });
+}
+
+/**
+ * Creates the training.nonfireReduced collection from the climate.nonfire2 collection
+ */
+function createTrainingNonFireReduced() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfire2";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "nonfireReduced";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+
+            console.log(`processing event '${doc["Event"]}'`);
+            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
+
+            const res = {};
+            res["Event"] = doc["Event"];
+            res["Latitude"] = doc["Latitude"];
+            res["Longitude"] = doc["Longitude"];
+            // populate climate feature columns
+            for (let j = 0; j < doc.points.length; j++) {
+                const point = doc.points[j];
+                const label = j - COMBINE_CONFIG.units < 0 ?
+                    `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k == "temperature" || k == "humidity" || k == "windSpeed");
+                for (let k = 0; k < props.length; k++) {
+                    const prop = props[k];
+                    res[`${prop}${label}`] = point[prop];
+                }
+            }
+            // set other features
+            res["Size"] = 0;
+            res["Costs"] = 0;
+            console.log('finished transforming doc');
+            cb(null, res);
+        });
+    });
+}
+
+/**
+ * Creates the training.nonfireRahul collection from the climate.nonfireRahul2 collection
+ */
+function createTrainingRahulNonfire() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfireRahul2";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "nonfireRahul";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+
+            console.log(`processing event '${doc["Event"]}'`);
+            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
+
+            const res = {};
+            res["Event"] = doc["Event"];
+            res["Latitude"] = doc["Latitude"];
+            res["Longitude"] = doc["Longitude"];
+            // populate climate feature columns
+            for (let j = 0; j < doc.points.length; j++) {
+                const point = doc.points[j];
+                const label = j - COMBINE_CONFIG.units < 0 ?
+                    `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k != "time" && k != "icon");
+                for (let k = 0; k < props.length; k++) {
+                    const prop = props[k];
+                    res[`${prop}${label}`] = point[prop];
+                }
+            }
+            // set other features
+            res["Size"] = 0;
+            res["Costs"] = 0;
+            console.log('finished transforming doc');
+            cb(null, res);
+        });
+    });
+}
+
+/**
+ * Creates the training.nonfireRahulReduced collection from the climate.nonfireRahul2 collection
+ */
+function createTrainingRahulNonfireReduced() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfireRahul2";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        // const outputCollectionName = "nonfireReduced";
+        const outputCollectionName = "nonfireRahulReduced";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+
+            console.log(`processing event '${doc["Event"]}'`);
+            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
+
+            const res = {};
+            res["Event"] = doc["Event"];
+            res["Latitude"] = doc["Latitude"];
+            res["Longitude"] = doc["Longitude"];
+            // populate climate feature columns
+            for (let j = 0; j < doc.points.length; j++) {
+                const point = doc.points[j];
+                const label = j - COMBINE_CONFIG.units < 0 ?
+                    `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
+                const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k == "temperature" || k == "humidity" || k == "windSpeed");
+                for (let k = 0; k < props.length; k++) {
+                    const prop = props[k];
+                    res[`${prop}${label}`] = point[prop];
+                }
+            }
+            // set other features
+            res["Size"] = 0;
+            res["Costs"] = 0;
+            console.log('finished transforming doc');
+            cb(null, res);
+        });
+    });
+}
+
+/**
+ * Creates the training.nonfireFormat2 collection from the climate.nonfire2 collection
+ */
+function createTrainingNonFireFormat2() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfire2";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "nonfireFormat2";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+            console.log(`processing event '${doc["Event"]}'`);
+            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
+            // pick out features from wildfire event to include
+            const eventId = doc["Event"];
+            const latitude = doc["Latitude"];
+            const longitude = doc["Longitude"];
+            const features = {};
+            for (let k = 0; k < doc.points.length; k++) {
+                const point = doc.points[k];
+                const props = Object.keys(point).filter(k => k != "time" && k != "icon");
+                for (let m = 0; m < props.length; m++) {
+                    const prop = props[m];
+                    if (!features[prop]) {
+                        features[prop] = [];
+                    }
+                    features[prop].push({
+                        time: point["time"],
+                        [prop]: point[prop]
                     });
                 }
-            });
+            }
+            const size = 0;
+            const costs = 0;
+            const res = {
+                'Event': eventId,
+                'Latitude': latitude,
+                'Longitude': longitude,
+                'Features': features,
+                'Size': size,
+                'Costs': costs
+            };
+            cb(null, res);
+            console.log('finished transforming doc');
+        });
+    });
+}
+
+/**
+ * Creates the training.firewithnonfire
+ */
+function createFireWithNonfire() {
+    return new Promise((resolve, reject) => {
+        const query_1 = {};
+        const projection_1 = {};
+
+        const query_2 = {};
+        const projection_2 = {};
+
+        const sourceDbUrl_1 = "mongodb://localhost:27017";
+        const sourceDbName_1 = "training";
+        const sourceCollectionName_1 = "training";
+
+        const sourceDbUrl_2 = "mongodb://localhost:27017";
+        const sourceDbName_2 = "training";
+        const sourceCollectionName_2 = "nonfire";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "firewithnonfire";
+
+        // stream the documents from the first collection to the output database
+        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
+            if (err_1) {
+                reject(err_1);
+            } else {
+                // stream the documents from the second collection to the output database
+                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
+                    if (err_2) {
+                        reject(err_2);
+                    } else {
+                        resolve();
+                    }
+                }, (doc, cb) => {
+                    cb(null, doc);
+                });
+            }
+        }, (doc, cb) => {
+            cb(null, doc);
+        });
+    });
+}
+
+/**
+ * Creates the training.firewithnonfire
+ */
+function createFireWithNonfireReduced() {
+    return new Promise((resolve, reject) => {
+        const query_1 = {};
+        const projection_1 = {};
+
+        const query_2 = {};
+        const projection_2 = {};
+
+        const sourceDbUrl_1 = "mongodb://localhost:27017";
+        const sourceDbName_1 = "training";
+        const sourceCollectionName_1 = "trainingReduced";
+
+        const sourceDbUrl_2 = "mongodb://localhost:27017";
+        const sourceDbName_2 = "training";
+        const sourceCollectionName_2 = "nonfireReduced";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "firewithnonfireReduced";
+
+        // stream the documents from the first collection to the output database
+        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
+            if (err_1) {
+                reject(err_1);
+            } else {
+                // stream the documents from the second collection to the output database
+                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
+                    if (err_2) {
+                        reject(err_2);
+                    } else {
+                        resolve();
+                    }
+                }, (doc, cb) => {
+                    cb(null, doc);
+                });
+            }
+        }, (doc, cb) => {
+            cb(null, doc);
+        });
+    });
+}
+
+/**
+ * Creates the training.firewithnonfireReducedFiltered
+ */
+function createFireWithNonfireReducedFiltered() {
+    return new Promise((resolve, reject) => {
+        const query_1 = {};
+        const projection_1 = {};
+
+        const query_2 = {};
+        const projection_2 = {};
+
+        const sourceDbUrl_1 = "mongodb://localhost:27017";
+        const sourceDbName_1 = "training";
+        const sourceCollectionName_1 = "trainingReducedFiltered";
+
+        const sourceDbUrl_2 = "mongodb://localhost:27017";
+        const sourceDbName_2 = "training";
+        const sourceCollectionName_2 = "nonfireReduced";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "firewithnonfireReducedFiltered";
+
+        // stream the documents from the first collection to the output database
+        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
+            if (err_1) {
+                reject(err_1);
+            } else {
+                // stream the documents from the second collection to the output database
+                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
+                    if (err_2) {
+                        reject(err_2);
+                    } else {
+                        resolve();
+                    }
+                }, (doc, cb) => {
+                    cb(null, doc);
+                });
+            }
+        }, (doc, cb) => {
+            cb(null, doc);
+        });
+    });
+}
+
+/**
+ * Creates the training.firewithnonfireReducedFiltered
+ */
+function createFireWithRahulNonfireReducedFiltered() {
+    return new Promise((resolve, reject) => {
+        const query_1 = {};
+        const projection_1 = {};
+
+        const query_2 = {};
+        const projection_2 = {};
+
+        const sourceDbUrl_1 = "mongodb://localhost:27017";
+        const sourceDbName_1 = "training";
+        const sourceCollectionName_1 = "firewithnonfireReducedFiltered";
+
+        const sourceDbUrl_2 = "mongodb://localhost:27017";
+        const sourceDbName_2 = "training";
+        const sourceCollectionName_2 = "nonfireRahulReduced";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "training";
+        const outputCollectionName = "firewithRahulNonfireReducedFiltered";
+
+        // stream the documents from the first collection to the output database
+        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
+            if (err_1) {
+                reject(err_1);
+            } else {
+                // stream the documents from the second collection to the output database
+                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
+                    if (err_2) {
+                        reject(err_2);
+                    } else {
+                        resolve();
+                    }
+                }, (doc, cb) => {
+                    cb(null, doc);
+                });
+            }
+        }, (doc, cb) => {
+            cb(null, doc);
+        });
+    });
+}
+
+function testDL() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "nonfireRahul";
+
+        streamTransform(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, (err) => {
+            if (err) {
+                logger.warn('yo, there was an error');
+                logger.debug(err);
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+            // console.log(JSON.stringify(doc, null, 4));
+            // logger.info(doc.hourly.length);
+            function report(message) {
+                logger.warn(`I think I found an event with a ${message} error:`);
+                logger.warn(doc.Event);
+            }
+            if(!doc.hourly){
+                report("!doc.hourly");
+            }
+            if (doc.hourly.length < 28) {
+                report("doc.hourly.length < 28");
+            }
+            if (!doc.hourly.reduce((bool, obj) => {
+                if(!obj.hourly){
+                    report("!obj.hourly");
+                    return false;
+                }
+                return bool && obj.hourly.data.length == 24;
+            }, true)) {
+                report("!doc.hourly.data.length==24");
+            }
+            cb(null, doc);
         });
     });
 }
@@ -378,11 +907,18 @@ function createWildfirePoints() { // uses buffer
 /**
  * Entry point for the training data combination stage.
  */
-function combineData() {
+function combineStages() {
     return new Promise((resolve, reject) => {
         // createFilteredPoints()
         // .then(createWildfirePoints)
-        createWildfirePoints()
+        // createWildfirePoints()
+        // combineFireWithNonfire()
+        // createFireWithNonfireReducedFiltered()
+        // createClimateRahulNonFire2()
+        // testDL()
+        // createTrainingRahulNonfire()
+        // createTrainingRahulNonfireReduced()
+        createFireWithRahulNonfireReducedFiltered()
             .then(resolve)
             .catch(err => {
                 reject(err);
@@ -391,5 +927,5 @@ function combineData() {
 };
 
 module.exports = {
-    combineData
+    combineStages
 }

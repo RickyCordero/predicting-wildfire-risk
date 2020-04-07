@@ -1,9 +1,14 @@
 const logger = require('./logger');
 
+const { saveToDBEach } = require('./db');
+const { CLIMATE_CONFIG } = require('./config');
 const request = require('request');
 const moment = require('moment-timezone');
-
 const { Transform } = require('stream');
+const async = require('async');
+const MongoClient = require('mongodb').MongoClient;
+const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
+const streamify = require('stream-array');
 
 const INTERVALS = ['currently', 'minutely', 'hourly', 'alerts', 'flags', 'daily'];
 
@@ -37,17 +42,17 @@ const getHistoricalClimateData = (config, cb) => {
  *  * @param {String} interval - A string representing the level of time granularity to include in each request object
  *  * @param {Number} units - The number of intervals of data to collect after each wildfire's ignition time
  *  * @param {Number} limit - The max number of requests to process at once for a single wildfire event
- *  * @param {Object} wildfire - A wildfire event object
+ *  * @param {Object} event - An event object
  * @param {Function} cb - The next function to call
  */
 const getHistoricalClimateDataEach = (config, cb) => {
-    const wildfire = config.wildfire;
-    const eventId = wildfire["Event"];
+    const event = config.event;
+    const eventId = event["Event"];
     logger.info(`collecting climate data for event ${eventId}`);
-    if (wildfire["Latitude"] != null && wildfire["Longitude"] != null && wildfire["Start Date"] != null) {
-        const latitude = wildfire["Latitude"];
-        const longitude = wildfire["Longitude"];
-        const ignitionDate = wildfire["Start Date"];
+    if (event["Latitude"] != null && event["Longitude"] != null && event["Start Date"] != null) {
+        const latitude = event["Latitude"];
+        const longitude = event["Longitude"];
+        const ignitionDate = event["Start Date"];
         // construct window bounds
         if (config.interval == 'daily' || config.interval == 'hourly') {
             let startDate;
@@ -148,7 +153,13 @@ function download(results, apiKey, startDate, endDate, latitude, longitude, inte
             logger.warn('yo, there was an error in the dark sky api request');
             cb({ error: requestError });
         } else {
-            const obj = JSON.parse(body);
+            let obj = {};
+            try {
+                obj = JSON.parse(body);
+            } catch (err) {
+                logger.debug(err);
+                logger.debug(body);
+            }
             results[interval].push(obj);
             if (startDate.isSameOrAfter(endDate)) {
                 // base case: date equal or overshot => return results
@@ -183,8 +194,8 @@ const getClimateDataEach = (climateConfig) => new Transform({
     writableObjectMode: true, // read an object
     readableObjectMode: true, // pass an object
     transform(chunk, _encoding, callback) {
-        logger.info(`processing event ${chunk["Event"]}`);
-        const obj = { ...climateConfig, wildfire: chunk };
+        logger.info(`processing event`);
+        const obj = { ...climateConfig, event: chunk };
         getHistoricalClimateDataEach(obj, (err, res) => {
             // push errors and results through stream
             if (err) {
@@ -245,7 +256,7 @@ const saveClimateData = (query, sourceDbUrl, sourceDbName, sourceCollectionName,
                                         mapCb(err);
                                     })
                                     .on('finish', () => {
-                                        logger.info(`done processing event ${item["Event"]}`);
+                                        logger.info(`done processing event`);
                                         mapCb();
                                     });
                             }, (mapErr, _mapRes) => {
@@ -264,6 +275,29 @@ const saveClimateData = (query, sourceDbUrl, sourceDbName, sourceCollectionName,
         }
     });
 };
+
+/**
+ * Entry point for the climate data collection and saving stage.
+ * Creates the local climate.training collection from the local arcgis.training collection.
+ */
+function saveClimateDataFromTraining() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "arcgis";
+        const sourceCollectionName = "training";
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "training";
+        saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
 
 /**
  * Creates the remote climate/training collection from the local climate/training collection using streams
@@ -323,6 +357,99 @@ function uploadClimateData() {
     });
 }
 
+function createTrainingClimateMap() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training";
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "map";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            const partitions = [];
+            const split = 2;
+            const p = docs.length / split;
+            for (let i = 0; i < split; i++) {
+                console.log(i);
+                const res = {};
+                for (let j = i * p; j < i * p + p; j++) {
+                    console.log('-------' + j);
+                    const doc = docs[j];
+                    const eventId = doc["Event"];
+                    if (!res[eventId]) {
+                        res[eventId] = {};
+                    }
+                    res[eventId] = _.omit(doc, "Event");
+                }
+                partitions.push(res);
+            }
+
+            cb(null, partitions);
+        });
+    });
+}
+
+function collectNonFireClimate() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "arcgis";
+        const sourceCollectionName = "nonfire";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "nonfire";
+        saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                logger.warn('yo there was an error saving the nonfire climate data');
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+function collectRahulNonFireClimate() {
+    return new Promise((resolve, reject) => {
+        // const query = {};
+        const query = { "Event": { $gte: "NONFIRE_1155" } };
+        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbName = "arcgis";
+        const sourceCollectionName = "nonfireRahul";
+
+        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbName = "climate";
+        const outputCollectionName = "nonfireRahul";
+        saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                logger.warn('yo there was an error saving the Rahul nonfire climate data');
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+function climateStages() {
+    return new Promise((resolve, reject) => {
+        // saveClimateDataFromTraining()
+        collectRahulNonFireClimate()
+            .then(resolve)
+            .catch(err => {
+                reject(err);
+            });
+    });
+}
+
 module.exports = {
-    saveClimateData
+    climateStages
 }

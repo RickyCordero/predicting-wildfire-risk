@@ -6,5 +6,11 @@ scripts/*.env
 scripts/log
 scripts/node_modules
 
+tf/venv/
+tf/.ipynb_checkpoints/
+tf/data/
+tf/models/
+
+
 .DS_Store
 .idea

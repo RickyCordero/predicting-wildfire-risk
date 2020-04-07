@@ -9,45 +9,48 @@ const { parse } = require('json2csv');
 
 const { loadTransform } = require('./db');
 
+// TODO: Implement automated data transformation server
+//  for iterative offline data testing
+
 app.get('/data', (req, res) => {
-    const { events, features } = req.query;
-    logger.info(JSON.stringify(events));
-    logger.info(JSON.stringify(features));
+    // const { events, features } = req.query;
+    // logger.info(JSON.stringify(events));
+    // logger.info(JSON.stringify(features));
     let query = {};
-    if (events != "*") {
-        query = {
-            $or: events.split(',').reduce((acc, event) => {
-                return acc.concat({ "Event": { $eq: event } });
-            }, [])
-        };
-    }
+    // if (events != "*") {
+    //     query = {
+    //         $or: events.split(',').reduce((acc, event) => {
+    //             return acc.concat({ "Event": { $eq: event } });
+    //         }, [])
+    //     };
+    // }
 
-    const projection = features.split(',').reduce((acc, f) => {
-        // acc[`Features.${f}`] = 1;
-        return acc;
-    }, { "Event": 1 });
+    // const projection = features.split(',').reduce((acc, f) => {
+    //     // acc[`Features.${f}`] = 1;
+    //     return acc;
+    // }, { "Event": 1 });
 
-    ["Latitude", "Longitude", "Size", "Costs"].forEach((f) => {
-        projection[f] = 1;
-    });
+    // ["Latitude", "Longitude", "Size", "Costs"].forEach((f) => {
+    //     projection[f] = 1;
+    // });
 
-    // const projection = {};
+    const projection = {};
 
-    const columns = features.split(',').reduce((acc, f) => {
-        // return acc.concat({
-        //     label: f,
-        //     value: `Features.${f}`
-        // });
-        return acc;
-    }, ["Event"]).concat(["Latitude", "Longitude", "Size", "Costs"]);
+    // const columns = features.split(',').reduce((acc, f) => {
+    //     // return acc.concat({
+    //     //     label: f,
+    //     //     value: `Features.${f}`
+    //     // });
+    //     return acc;
+    // }, ["Event"]).concat(["Latitude", "Longitude", "Size", "Costs"]);
 
-    logger.info(JSON.stringify(query));
-    logger.info(JSON.stringify(projection));
-    logger.info(JSON.stringify(columns));
+    // logger.info(JSON.stringify(query));
+    // logger.info(JSON.stringify(projection));
+    // logger.info(JSON.stringify(columns));
 
     const sourceDbUrl = "mongodb://localhost:27017";
     const sourceDbName = "training";
-    const sourceCollectionName = "training2";
+    const sourceCollectionName = "training";
 
     loadTransform(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, (queryError, queryResult) => {
         if (queryError) {
