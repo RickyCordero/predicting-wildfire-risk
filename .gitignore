@@ -1,8 +1,3 @@
-data-scraping
-data-scraping/wildfire/node_modules
-data-scraping/wildfire/output
-data-scraping/wildfire/package-lock.json
-
 scripts/*.env
 scripts/log
 scripts/node_modules
@@ -11,7 +6,9 @@ tf/venv/
 tf/.ipynb_checkpoints/
 tf/data/
 tf/models/
-
+tf/DNN_example.ipynb
+tf/DNN_neural_net-Copy1.ipynb
+tf/neural_net_wildfires.ipynb
 
 .DS_Store
 .idea
