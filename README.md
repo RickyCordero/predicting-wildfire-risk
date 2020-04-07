@@ -1,4 +1,4 @@
-# scripts
+# predicting-wildfire-risk
 
 Collects US wildland fire event data spanning 2002-2018. Downloads historical climate data for each event in any desired subset of the collected events. Combines the datasets into a single training data set to be used for applying machine learning techniques.
 
