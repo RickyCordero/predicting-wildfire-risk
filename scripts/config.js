@@ -4,7 +4,7 @@ const { inBounds } = require('./utils');
 
 const WILDFIRE_CONFIG = {
     query: { $and: [{ "State": { $eq: "CA" } }, { $or: [{ "Size": { $gte: 0 } }, { "Costs": { $gte: 0 } }] }] },
-    outputDbUrl: 'mongodb://localhost:27017',
+    outputDbUrl: process.env.MONGODB_URL,
     outputDbName: 'arcgis',
     outputCollectionName: 'training',
     transform: (docs) => {

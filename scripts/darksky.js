@@ -283,10 +283,10 @@ const saveClimateData = (query, sourceDbUrl, sourceDbName, sourceCollectionName,
 function saveClimateDataFromTraining() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "training";
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "training";
         saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -305,7 +305,7 @@ function saveClimateDataFromTraining() {
 function uploadClimateData() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training";
         const outputDbUrl = process.env.MONGODB_URL;
@@ -360,10 +360,10 @@ function uploadClimateData() {
 function createTrainingClimateMap() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training";
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "map";
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -399,11 +399,11 @@ function createTrainingClimateMap() {
 function collectNonFireClimate() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "nonfire";
 
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "nonfire";
         saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -421,11 +421,11 @@ function collectRahulNonFireClimate() {
     return new Promise((resolve, reject) => {
         // const query = {};
         const query = { "Event": { $gte: "NONFIRE_1155" } };
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "nonfireRahul";
 
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "nonfireRahul";
         saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {

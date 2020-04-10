@@ -31,7 +31,7 @@ const FEATURES_C = ["firediscoverydatetime", "incidentname", "latitude", "longit
  */
 function downloadRaw() {
     return new Promise((resolve, reject) => {
-        MongoClient.connect("mongodb://localhost:27017", (dbError, dbClient) => {
+        MongoClient.connect(WILDFIRE_CONFIG.MONGODB_URL, (dbError, dbClient) => {
             if (dbError) {
                 logger.warn('yo, there was an error connecting to the local database');
                 reject(dbError);
@@ -81,10 +81,10 @@ function downloadRaw() {
 function createEventsFromRaw() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "raw";
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "events";
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -108,10 +108,10 @@ function createEventsFromRaw() {
 function createUniqueFromEvents() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "events";
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "unique";
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -145,7 +145,7 @@ function createUniqueFromEvents() {
  * @param {Function} transform - The function to apply to the array of documents from the source collection query results
  */
 function createUniqueView(query, outputDbUrl, outputDbName, outputCollectionName, callback, transform) {
-    const sourceDbUrl = "mongodb://localhost:27017";
+    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionName = "unique";
     loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback, transform);
@@ -163,7 +163,7 @@ function createWildfiresFromUnique() {
                 queryC.isWildfire
             ]
         };
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "wildfires";
         createUniqueView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -186,7 +186,7 @@ function createWildfiresFromUnique() {
  * @param {Function} transform - The function to apply to the array of documents from the source collection query results
  */
 function createWildfireView(query, outputDbUrl, outputDbName, outputCollectionName, callback, transform) {
-    const sourceDbUrl = "mongodb://localhost:27017";
+    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionName = "wildfires";
     loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback, transform);
@@ -200,7 +200,7 @@ function createWildfireView(query, outputDbUrl, outputDbName, outputCollectionNa
 function createStandardizedWildfires() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "standardized";
         createWildfireView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -236,7 +236,7 @@ function createStandardizedWildfires() {
  * @param {Function} transform - The function to apply to the array of documents from the source collection query results
  */
 function createStandardizedView(query, outputDbUrl, outputDbName, outputCollectionName, callback, transform) {
-    const sourceDbUrl = "mongodb://localhost:27017";
+    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionName = "standardized";
     loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback, transform);
@@ -360,7 +360,7 @@ function processDateC(datetime, latitude, longitude) {
  * Uploads the arcgis.raw, arcgis.events, arcgis.unique, arcgis.wildfires, and arcgis.standardized collections to the remote database
  */
 function upload() {
-    const sourceDbUrl = "mongodb://localhost:27017";
+    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionNames = ["raw", "events", "unique", "wildfires", "standardized"];
     const outputDbUrl = process.env.MONGODB_URL;
@@ -420,10 +420,10 @@ function createTrainingWildfires() {
 function createTrainingWildfiresMap() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = "mongodb://localhost:27017";
+        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "training";
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "map";
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -453,7 +453,7 @@ function createTrainingWildfiresMap() {
  */
 function createNonFireEvents() {
     return new Promise((resolve, reject) => {
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "nonfire";
         MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
@@ -501,7 +501,7 @@ function createNonFireEvents() {
  */
 function createRahulNonFireEvents() {
     return new Promise((resolve, reject) => {
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "nonfireRahul";
         MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
@@ -558,15 +558,15 @@ function combineAllNonFireEvents() {
         const query_2 = {};
         const projection_2 = {};
 
-        const sourceDbUrl_1 = "mongodb://localhost:27017";
+        const sourceDbUrl_1 = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName_1 = "arcgis";
         const sourceCollectionName_1 = "nonfire";
 
-        const sourceDbUrl_2 = "mongodb://localhost:27017";
+        const sourceDbUrl_2 = WILDFIRE_CONFIG.MONGODB_URL;
         const sourceDbName_2 = "arcgis";
         const sourceCollectionName_2 = "nonfireRahul";
 
-        const outputDbUrl = "mongodb://localhost:27017";
+        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "nonfireAll";
 
