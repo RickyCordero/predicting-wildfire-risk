@@ -10,7 +10,7 @@ const { Transform } = require('stream');
 const utils = require('./utils');
 
 /**
- * Saves data to a mongo collection
+ * Saves data to a mongo collection.
  * @param {MongoDb} db - The mongo database object
  * @param {Array<Object>} data - The array of objects to be saved
  * @param {String} outputCollectionName - The name of the output collection
@@ -29,7 +29,7 @@ module.exports.saveToDBBuffer = (db, data, outputCollectionName, cb) => {
 
 /**
  * Creates a transform stream that streams a wildfire event object array to the output database
- * specified in the configuration object
+ * specified in the configuration object.
  * @param {Object} config - The configuration object containing the following:
  *  * @param {String} dbName - The name of the output mongo database
  *  * @param {String} dbURL - The output mongo url
@@ -62,7 +62,7 @@ module.exports.saveToDB = (config) => new Transform({
 
 /**
  * Creates a transform stream that streams a wildfire event object to the output database
- * specified in the configuration object
+ * specified in the configuration object.
  * @param {Object} config - The configuration object containing the following:
  *  * @param {String} dbName - The name of the output mongo database
  *  * @param {String} dbURL - The output mongo url
@@ -99,7 +99,7 @@ module.exports.saveToDBEach = (config) => new Transform({
 });
 
 /**
- * Loads a collection using a mongo connection object
+ * Loads a collection using a mongo connection object.
  * @param {MongoClient} dbClient - The mongo connection object
  * @param {String} dbName - The name of the database for which data should be retrieved
  * @param {String} collectionName - The name of the collection for which data should be retrieved
@@ -119,7 +119,7 @@ module.exports.loadFromDBBuffer = (dbClient, dbName, collectionName, cb) => {
 
 /**
  * Combines multiple collections from multiple databases into a single output collection in a database,
- * and applies the transform function, if given, to each element before saving
+ * and applies the transform function, if given, to each element before saving.
  * @param {Array<Object>} inputs - The array of input objects containing source database and collection name key-value pairs containing the following properties:
  *  * @param {Object} query - The mongo query object to be used for filtering 
  *  * @param {String} sourceDbName - The name of the source database
@@ -435,82 +435,4 @@ module.exports.streamTransform = (query, projection, sourceDbUrl, sourceDbName, 
                 });
         }
     });
-}
-
-
-
-const func = (sourceQueryError, sourceQueryResults) => {
-    if (sourceQueryError) {
-        logger.warn('yo, there was an error querying the source collection');
-        callback(sourceQueryError);
-        sourceDbClient.close();
-    } else {
-        logger.info(`successfully loaded data from ${sourceDbName}/${sourceCollectionName}`);
-        if (transform) {
-            logger.info(`calling transform`);
-            transform(sourceQueryResults, (err, transformedDocs) => {
-                if (err) {
-                    logger.warn(`yo, there was an error transforming docs from ${sourceDbName}/${sourceCollectionName}`);
-                    callback(err);
-                } else {
-                    logger.info(`transform completed successfully`);
-                    callback(null, transformedDocs);
-                }
-                sourceDbClient.close();
-            });
-        } else {
-            callback(null, sourceQueryResults);
-            sourceDbClient.close();
-        }
-    }
-};
-
-(sourceQueryError, sourceQueryResults) => {
-    if (sourceQueryError) {
-        logger.warn('yo, there was an error querying the source collection');
-        callback(sourceQueryError);
-        outputDbClient.close();
-        sourceDbClient.close();
-    } else {
-        logger.info(`connected to ${outputDbName}/${outputCollectionName} successfully`);
-        const outputDb = outputDbClient.db(outputDbName);
-        if (transform) {
-            logger.info(`calling transform`);
-            transform(sourceQueryResults, (err, transformedDocs) => {
-                if (err) {
-                    logger.warn(`yo, there was an error transforming docs from ${sourceDbName}/${sourceCollectionName}`);
-                    callback(err);
-                    outputDbClient.close();
-                    sourceDbClient.close();
-                } else {
-                    logger.info(`transform completed successfully`);
-                    logger.info(`attempting to save data to ${outputDbName}/${outputCollectionName}`);
-                    module.exports.saveToDBBuffer(outputDb, transformedDocs, outputCollectionName, (saveError, _saveResult) => {
-                        if (saveError) {
-                            logger.warn(`yo, there was an error saving to ${outputDbName}/${outputCollectionName}`);
-                            callback(saveError);
-                        } else {
-                            logger.info(`successfully saved data to ${outputDbName}/${outputCollectionName}`);
-                            callback();
-                        }
-                        outputDbClient.close();
-                        sourceDbClient.close();
-                    });
-                }
-            });
-        } else {
-            logger.info(`attempting to save data to ${outputDbName}/${outputCollectionName}`);
-            module.exports.saveToDBBuffer(outputDb, sourceQueryResults, outputCollectionName, (saveError, _saveResult) => {
-                if (saveError) {
-                    logger.warn(`yo, there was an error saving to ${outputDbName}/${outputCollectionName}`);
-                    callback(saveError);
-                } else {
-                    logger.info(`successfully saved data to ${outputDbName}/${outputCollectionName}`);
-                    callback();
-                }
-                outputDbClient.close();
-                sourceDbClient.close();
-            });
-        }
-    }
 }

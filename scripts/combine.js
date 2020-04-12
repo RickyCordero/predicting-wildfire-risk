@@ -135,17 +135,17 @@ function transformClimateDatum(datum) {
 
 
 /**
- * Creates the climate.filteredPoints collection from the climate.training collection
+ * Creates the climate.training2 collection from the climate.training collection
  */
 function createClimateTraining2() { // uses streams
     return new Promise((resolve, reject) => {
         const query = {};
         const projection = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "training2";
         streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -173,17 +173,17 @@ function createTrainingTraining() { // uses streams
         const climateQuery = {};
         const climateProjection = {};
 
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training2";
 
         const wildfireQuery = {};
         const wildfireProjection = {};
-        const wildfireDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const wildfireDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const wildfireDbName = "arcgis";
         const wildfireCollectionName = "map";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "training";
         loadTransform(wildfireQuery, wildfireProjection, wildfireDbUrl, wildfireDbName, wildfireCollectionName, (transformError) => {
@@ -227,24 +227,24 @@ function createTrainingTraining() { // uses streams
 }
 
 /**
- * Creates the training.training collection from the climate.training2 collection
+ * Creates the training.trainingReduced collection from the climate.training2 collection
  */
 function createTrainingReduced() { // uses streams
     return new Promise((resolve, reject) => {
         const climateQuery = {};
         const climateProjection = {};
 
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training2";
 
         const wildfireQuery = {};
         const wildfireProjection = {};
-        const wildfireDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const wildfireDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const wildfireDbName = "arcgis";
         const wildfireCollectionName = "map";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "trainingReduced";
         loadTransform(wildfireQuery, wildfireProjection, wildfireDbUrl, wildfireDbName, wildfireCollectionName, (transformError) => {
@@ -295,17 +295,17 @@ function createTrainingTrainingFormat2() { // uses streams
         const climateQuery = {};
         const projection = {};
 
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training2";
 
         const wildfireQuery = {};
         const wildfireProjection = {};
-        const wildfireDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const wildfireDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const wildfireDbName = "arcgis";
         const wildfireCollectionName = "map";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "trainingFormat2";
         loadTransform(wildfireQuery, wildfireProjection, wildfireDbUrl, wildfireDbName, wildfireCollectionName, (transformError) => {
@@ -368,11 +368,11 @@ function createClimateNonFire2() { // uses streams
     return new Promise((resolve, reject) => {
         const query = {};
         const projection = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "nonfire";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "nonfire2";
         streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -390,34 +390,7 @@ function createClimateNonFire2() { // uses streams
     });
 }
 
-/**
- * Creates the climate.nonfireRahul2 collection from the climate.nonfireRahul collection
- */
-function createClimateRahulNonFire2() { // uses streams
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const projection = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName = "climate";
-        const sourceCollectionName = "nonfireRahul";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "climate";
-        const outputCollectionName = "nonfireRahul2";
-        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (doc, cb) => {
-            if (doc.error) {
-                logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
-            }
-            cb(null, transformClimateDatum(doc));
-        });
-    });
-}
 
 /**
  * Creates the training.nonfire collection from the climate.nonfire2 collection
@@ -427,11 +400,11 @@ function createTrainingNonFire() { // uses streams
         const query = {};
         const projection = {};
 
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "nonfire2";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "nonfire";
         streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -477,11 +450,11 @@ function createTrainingNonFireReduced() { // uses streams
         const query = {};
         const projection = {};
 
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "nonfire2";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "nonfireReduced";
         streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -490,108 +463,7 @@ function createTrainingNonFireReduced() { // uses streams
             } else {
                 resolve();
             }
-        }, (doc, cb) => {
-
-            console.log(`processing event '${doc["Event"]}'`);
-            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
-
-            const res = {};
-            res["Event"] = doc["Event"];
-            res["Latitude"] = doc["Latitude"];
-            res["Longitude"] = doc["Longitude"];
-            // populate climate feature columns
-            for (let j = 0; j < doc.points.length; j++) {
-                const point = doc.points[j];
-                const label = j - COMBINE_CONFIG.units < 0 ?
-                    `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
-                const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k == "temperature" || k == "humidity" || k == "windSpeed");
-                for (let k = 0; k < props.length; k++) {
-                    const prop = props[k];
-                    res[`${prop}${label}`] = point[prop];
-                }
-            }
-            // set other features
-            res["Size"] = 0;
-            res["Costs"] = 0;
-            console.log('finished transforming doc');
-            cb(null, res);
-        });
-    });
-}
-
-/**
- * Creates the training.nonfireRahul collection from the climate.nonfireRahul2 collection
- */
-function createTrainingRahulNonfire() { // uses streams
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const projection = {};
-
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName = "climate";
-        const sourceCollectionName = "nonfireRahul2";
-
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "training";
-        const outputCollectionName = "nonfireRahul";
-        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (doc, cb) => {
-
-            console.log(`processing event '${doc["Event"]}'`);
-            console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
-
-            const res = {};
-            res["Event"] = doc["Event"];
-            res["Latitude"] = doc["Latitude"];
-            res["Longitude"] = doc["Longitude"];
-            // populate climate feature columns
-            for (let j = 0; j < doc.points.length; j++) {
-                const point = doc.points[j];
-                const label = j - COMBINE_CONFIG.units < 0 ?
-                    `_${COMBINE_CONFIG.units - j}` : j - COMBINE_CONFIG.units;
-                const props = COMBINE_CONFIG.props ? COMBINE_CONFIG.props : Object.keys(point).filter(k => k != "time" && k != "icon");
-                for (let k = 0; k < props.length; k++) {
-                    const prop = props[k];
-                    res[`${prop}${label}`] = point[prop];
-                }
-            }
-            // set other features
-            res["Size"] = 0;
-            res["Costs"] = 0;
-            console.log('finished transforming doc');
-            cb(null, res);
-        });
-    });
-}
-
-/**
- * Creates the training.nonfireRahulReduced collection from the climate.nonfireRahul2 collection
- */
-function createTrainingRahulNonfireReduced() { // uses streams
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const projection = {};
-
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName = "climate";
-        const sourceCollectionName = "nonfireRahul2";
-
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "training";
-        // const outputCollectionName = "nonfireReduced";
-        const outputCollectionName = "nonfireRahulReduced";
-        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (doc, cb) => {
+        }, (doc, cb) => { // function to transform each doc from source collection before writing to destination
 
             console.log(`processing event '${doc["Event"]}'`);
             console.log(JSON.stringify(_.omit(doc, "points"), null, 4));
@@ -628,11 +500,11 @@ function createTrainingNonFireFormat2() { // uses streams
         const query = {};
         const projection = {};
 
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "nonfire2";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "nonfireFormat2";
         streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
@@ -690,15 +562,15 @@ function createFireWithNonfire() {
         const query_2 = {};
         const projection_2 = {};
 
-        const sourceDbUrl_1 = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl_1 = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName_1 = "training";
         const sourceCollectionName_1 = "training";
 
-        const sourceDbUrl_2 = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl_2 = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName_2 = "training";
         const sourceCollectionName_2 = "nonfire";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "firewithnonfire";
 
@@ -735,15 +607,15 @@ function createFireWithNonfireReduced() {
         const query_2 = {};
         const projection_2 = {};
 
-        const sourceDbUrl_1 = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl_1 = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName_1 = "training";
         const sourceCollectionName_1 = "trainingReduced";
 
-        const sourceDbUrl_2 = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl_2 = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName_2 = "training";
         const sourceCollectionName_2 = "nonfireReduced";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "firewithnonfireReduced";
 
@@ -780,24 +652,24 @@ function createFireWithNonfireReducedFiltered() {
         const query_2 = {};
         const projection_2 = {};
 
-        const sourceDbUrl_1 = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl_1 = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName_1 = "training";
         const sourceCollectionName_1 = "trainingReducedFiltered";
 
-        const sourceDbUrl_2 = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl_2 = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName_2 = "training";
         const sourceCollectionName_2 = "nonfireReduced";
 
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "training";
         const outputCollectionName = "firewithnonfireReducedFiltered";
 
-        // stream the documents from the first collection to the output database
+        // stream the documents from the first source collection to the output collection
         streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
             if (err_1) {
                 reject(err_1);
             } else {
-                // stream the documents from the second collection to the output database
+                // stream the documents from the second source collection to the output database
                 streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
                     if (err_2) {
                         reject(err_2);
@@ -813,112 +685,16 @@ function createFireWithNonfireReducedFiltered() {
         });
     });
 }
-
-/**
- * Creates the training.firewithnonfireReducedFiltered
- */
-function createFireWithRahulNonfireReducedFiltered() {
-    return new Promise((resolve, reject) => {
-        const query_1 = {};
-        const projection_1 = {};
-
-        const query_2 = {};
-        const projection_2 = {};
-
-        const sourceDbUrl_1 = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName_1 = "training";
-        const sourceCollectionName_1 = "firewithnonfireReducedFiltered";
-
-        const sourceDbUrl_2 = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName_2 = "training";
-        const sourceCollectionName_2 = "nonfireRahulReduced";
-
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "training";
-        const outputCollectionName = "firewithRahulNonfireReducedFiltered";
-
-        // stream the documents from the first collection to the output database
-        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
-            if (err_1) {
-                reject(err_1);
-            } else {
-                // stream the documents from the second collection to the output database
-                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
-                    if (err_2) {
-                        reject(err_2);
-                    } else {
-                        resolve();
-                    }
-                }, (doc, cb) => {
-                    cb(null, doc);
-                });
-            }
-        }, (doc, cb) => {
-            cb(null, doc);
-        });
-    });
-}
-
-function testDL() {
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const projection = {};
-
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName = "climate";
-        const sourceCollectionName = "nonfireRahul";
-
-        streamTransform(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, (err) => {
-            if (err) {
-                logger.warn('yo, there was an error');
-                logger.debug(err);
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (doc, cb) => {
-            // console.log(JSON.stringify(doc, null, 4));
-            // logger.info(doc.hourly.length);
-            function report(message) {
-                logger.warn(`I think I found an event with a ${message} error:`);
-                logger.warn(doc.Event);
-            }
-            if(!doc.hourly){
-                report("!doc.hourly");
-            }
-            if (doc.hourly.length < 28) {
-                report("doc.hourly.length < 28");
-            }
-            if (!doc.hourly.reduce((bool, obj) => {
-                if(!obj.hourly){
-                    report("!obj.hourly");
-                    return false;
-                }
-                return bool && obj.hourly.data.length == 24;
-            }, true)) {
-                report("!doc.hourly.data.length==24");
-            }
-            cb(null, doc);
-        });
-    });
-}
-
 
 /**
  * Entry point for the training data combination stage.
  */
 function combineStages() {
     return new Promise((resolve, reject) => {
-        // createFilteredPoints()
-        // .then(createWildfirePoints)
-        // createWildfirePoints()
-        // combineFireWithNonfire()
-        // createFireWithNonfireReducedFiltered()
-        // createClimateRahulNonFire2()
-        // testDL()
-        // createTrainingRahulNonfire()
-        // createTrainingRahulNonfireReduced()
-        createFireWithRahulNonfireReducedFiltered()
+        createClimateTraining2()
+            .then(createWildfirePoints)
+            .then(combineFireWithNonfire)
+            .then(createFireWithNonfireReducedFiltered)
             .then(resolve)
             .catch(err => {
                 reject(err);

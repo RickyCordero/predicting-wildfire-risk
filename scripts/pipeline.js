@@ -1,5 +1,5 @@
+const { wildfireStages } = require('./arcgis');
 const { climateStages } = require('./darksky');
 const { combineStages } = require('./combine');
-const { wildfireStages } = require('./arcgis');
 
-module.exports = [combineStages];
+module.exports = [wildfireStages, climateStages, combineStages];

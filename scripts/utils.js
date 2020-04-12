@@ -80,7 +80,7 @@ module.exports.filterMaxInfo = function (docs, keyFunc) {
  * taking the first occurrence if there are multiple
  * @param {Array<Object>} duplicates - The array of objects
  */
-module.exports.maxInfo = (duplicates) => {
+module.exports.maxInfo = function (duplicates) {
     return _.omit(duplicates.map(d => {
         return {
             ...d,

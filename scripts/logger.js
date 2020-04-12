@@ -2,6 +2,7 @@
 const { createLogger, format, transports } = require('winston');
 const fs = require('fs');
 const path = require('path');
+const moment = require('moment-timezone');
 
 const env = process.env.NODE_ENV || 'development';
 const logDir = 'log';
@@ -11,7 +12,9 @@ if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir);
 }
 
-const filename = path.join(logDir, 'results.log');
+// set log file name to current date and time
+const date = moment().format("YYYYMMDD_HHmmss");
+const filename = path.join(logDir, date+'.log');
 
 const logger = createLogger({
     // change level if in dev environment versus production

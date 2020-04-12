@@ -1,6 +1,5 @@
 const logger = require('./logger');
 
-const fs = require('fs');
 const async = require('async');
 const request = require('request');
 const _ = require('lodash');
@@ -8,11 +7,8 @@ const MongoClient = require('mongodb').MongoClient;
 const tzlookup = require('tz-lookup');
 const moment = require('moment-timezone');
 
-const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
-const streamify = require('stream-array');
-
 const { WILDFIRE_CONFIG } = require('./config');
-const { saveToDBBuffer, loadSave, streamSave } = require('./db');
+const { saveToDBBuffer, loadSave } = require('./db');
 const { dateComparator, filterMaxInfo } = require('./utils');
 const { queryA, queryB, queryC } = require('./queries');
 
@@ -21,31 +17,34 @@ const FEATURES_B = ["start_date", "start_hour", "fire_name", "latitude", "longit
 const FEATURES_C = ["firediscoverydatetime", "incidentname", "latitude", "longitude", "state", "acres", "uniquefireidentifier"];
 
 /**
- * Downloads raw wildfire data from the ArcGIS REST API from 2002 to 2018
- * and saves it to the local arcgis.raw collection
+ * Downloads raw wildfire data from the USGS ArcGIS REST API from 2002 to 2018
+ * and saves it to the arcgis.raw collection
  * https://rmgsc-haws1.cr.usgs.gov/arcgis/sdk/rest/index.html#//02ss0000006v000000
- * id=26 => 2002
- * id=25 => 2003
+ * id=27 => 2002
+ * id=26 => 2003
  * ...
- * id=10 => 2018
+ * id=10 => 2019
  */
 function downloadRaw() {
     return new Promise((resolve, reject) => {
-        MongoClient.connect(WILDFIRE_CONFIG.MONGODB_URL, (dbError, dbClient) => {
+        MongoClient.connect(WILDFIRE_CONFIG.PRIMARY_MONGODB_URL, (dbError, dbClient) => {
             if (dbError) {
-                logger.warn('yo, there was an error connecting to the local database');
+                logger.warn('yo, there was an error connecting to the database');
                 reject(dbError);
             } else {
+                // generate the ids that correspond to a year
                 const yearIds = [];
-                for (let i = 10; i <= 26; i++) {
+                for (let i = 10; i <= 27; i++) {
                     yearIds.push(i);
                 }
+                // query the API and get data for each year
                 async.map(yearIds, (yearId, mapCb) => {
                     const url = `https://wildfire.cr.usgs.gov/ArcGIS/rest/services/geomac_dyn/MapServer/${yearId}/query?where=1%3D1&outFields=*&outSR=4326&f=json`;
                     request(url, (err, _res, body) => {
                         if (err) {
                             mapCb(err);
                         } else {
+                            // parse the API response as a JSON object
                             const obj = JSON.parse(body);
                             mapCb(null, obj);
                         }
@@ -55,6 +54,7 @@ function downloadRaw() {
                         logger.warn('yo, there was a map error');
                         reject(mapErr);
                     } else {
+                        // if successful, save all API response JSON objects to the "raw" collection
                         logger.info('finished downloading all data');
                         const dbName = "arcgis";
                         const collectionName = "raw";
@@ -76,17 +76,19 @@ function downloadRaw() {
 }
 
 /**
- * Creates the local arcgis.events collection from the local arcgis.raw collection
+ * Creates the arcgis.events collection by constructing event objects 
+ * using the raw response objects from the arcgis.raw collection.
  */
 function createEventsFromRaw() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "raw";
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "events";
+        // Load each document from the "raw" collection
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
@@ -94,6 +96,7 @@ function createEventsFromRaw() {
                 resolve();
             }
         }, (docs, cb) => {
+            // Construct each event document from the response objects in the "raw" collection
             cb(null, docs.reduce((acc, obj) => {
                 const rows = obj.features.map(f => f.attributes);
                 return acc.concat(rows);
@@ -103,17 +106,19 @@ function createEventsFromRaw() {
 }
 
 /**
- * Creates the local arcgis.unique collection from the local arcgis.events collection
+ * Creates the arcgis.unique collection from the arcgis.events collection
+ * by filtering out duplicate events.
  */
 function createUniqueFromEvents() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "arcgis";
         const sourceCollectionName = "events";
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "unique";
+        // Load each document from the "raw" collection
         loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
@@ -122,6 +127,7 @@ function createUniqueFromEvents() {
             }
         }, (docs, cb) => {
             cb(null, filterMaxInfo(docs, (doc) => {
+                // Filter out duplicate documents from the "events" collection using this hash function
                 if (doc["itype"]) {
                     return JSON.stringify(_.pick(doc, ["event_id"]));
                 } else if (doc["inc_type"]) {
@@ -136,7 +142,8 @@ function createUniqueFromEvents() {
 }
 
 /**
- * Creates a view of unique events
+ * Creates a new collection by applying the given transformation function on
+ * each event from the arcgis.unique collection of events.
  * @param {Object} query - The mongo query object
  * @param {String} outputDbUrl - The mongo url of the output database
  * @param {String} outputDbName - The name of the output database
@@ -145,17 +152,19 @@ function createUniqueFromEvents() {
  * @param {Function} transform - The function to apply to the array of documents from the source collection query results
  */
 function createUniqueView(query, outputDbUrl, outputDbName, outputCollectionName, callback, transform) {
-    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+    const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionName = "unique";
     loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback, transform);
 }
 
 /**
- * Creates the local arcgis.wildfires collection from the local arcgis.unique collection
+ * Creates the arcgis.wildfires collection by filtering out all non-wildfire 
+ * events from the arcgis.unique collection.
  */
 function createWildfiresFromUnique() {
     return new Promise((resolve, reject) => {
+        // MongoDB query to identify only wildfire events
         const query = {
             $or: [
                 queryA.isWildfire,
@@ -163,9 +172,10 @@ function createWildfiresFromUnique() {
                 queryC.isWildfire
             ]
         };
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "wildfires";
+        // Load query results into "wildfires" collection
         createUniqueView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
@@ -177,7 +187,8 @@ function createWildfiresFromUnique() {
 }
 
 /**
- * Creates a view of unique wildfire events
+ * Creates a new collection by applying the given transformation function on 
+ * each event from the arcgis.wildfire collection of wildfire events.
  * @param {Object} query - The mongo query object to be used for filtering
  * @param {String} outputDbUrl - The mongo url of the destination database
  * @param {String} outputDbName - The destination database name
@@ -186,23 +197,26 @@ function createWildfiresFromUnique() {
  * @param {Function} transform - The function to apply to the array of documents from the source collection query results
  */
 function createWildfireView(query, outputDbUrl, outputDbName, outputCollectionName, callback, transform) {
-    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+    const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionName = "wildfires";
     loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback, transform);
 }
 
 /**
- * Creates the local arcgis.standardized collection from the local arcgis.wildfires collection
- * where each document represents a wildfire event, each document has uniform key names for a base 
- * set of keys defined in each processDoc function
+ * Creates the arcgis.standardized collection by applying a standardization function 
+ * to each wildfire event document in the arcgis.wildfires collection.
+ * Each document in the standardized collection represents a wildfire event.
+ * Each event has attribute names uniformly described by "Event", "Incident Name", "Start Date", 
+ * "Latitude", "Longitude", "State", "Size" and has values uniformly described in proper units.
  */
 function createStandardizedWildfires() {
     return new Promise((resolve, reject) => {
         const query = {};
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "arcgis";
         const outputCollectionName = "standardized";
+        // Load each document from the "wildfire" collection
         createWildfireView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
             if (err) {
                 reject(err);
@@ -210,6 +224,7 @@ function createStandardizedWildfires() {
                 resolve();
             }
         }, (docs) => {
+            // Transform each document (can be of type A, B, or C) into a single standardized format
             const standardized = docs.map(doc => {
                 if (doc["itype"]) { // 2002 - 2005
                     return processDocA(doc);
@@ -227,7 +242,8 @@ function createStandardizedWildfires() {
 }
 
 /**
- * Creates a view of standardized unique wildfire events
+ * Creates a new collection by applying the given transformation function on 
+ * each event from the arcgis.standardized collection of wildfire events.
  * @param {Object} query - The mongo query object to be used for filtering
  * @param {String} outputDbUrl - The mongo url of the destination database
  * @param {String} outputDbName - The destination database name
@@ -236,7 +252,7 @@ function createStandardizedWildfires() {
  * @param {Function} transform - The function to apply to the array of documents from the source collection query results
  */
 function createStandardizedView(query, outputDbUrl, outputDbName, outputCollectionName, callback, transform) {
-    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
+    const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
     const sourceDbName = "arcgis";
     const sourceCollectionName = "standardized";
     loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, callback, transform);
@@ -244,7 +260,7 @@ function createStandardizedView(query, outputDbUrl, outputDbName, outputCollecti
 
 /**
  * Given a raw wildfire event object of type A, returns a standardized representation of the object
- * that keeps all keys unused for climate gathering, but renames and/or removes keys used to create standardized keys
+ * that keeps all keys unused for climate gathering, but renames and/or removes keys used to create standardized keys.
  * @param {Object} doc - The wildfire event object
  */
 function processDocA(doc) {
@@ -357,27 +373,56 @@ function processDateC(datetime, latitude, longitude) {
 }
 
 /**
- * Uploads the arcgis.raw, arcgis.events, arcgis.unique, arcgis.wildfires, and arcgis.standardized collections to the remote database
+ * Creates the arcgis.training collection by applying a transformation function 
+ * to each wildfire event document in the arcgis.standardized collection.
  */
-function upload() {
-    const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-    const sourceDbName = "arcgis";
-    const sourceCollectionNames = ["raw", "events", "unique", "wildfires", "standardized"];
-    const outputDbUrl = process.env.MONGODB_URL;
-    const outputDbName = "arcgis";
-    const promisify = (sourceCollectionName) => {
-        return new Promise((resolve, reject) => {
-            const outputCollectionName = sourceCollectionName;
-            loadSave({}, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve();
-                }
+function createTrainingWildfires() {
+    return new Promise((resolve, reject) => {
+        const query = WILDFIRE_CONFIG.QUERY;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const outputDbName = WILDFIRE_CONFIG.PRIMARY_DB_NAME;
+        const outputCollectionName = WILDFIRE_CONFIG.PRIMARY_COLLECTION_NAME;
+        createStandardizedView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, WILDFIRE_CONFIG.TRANSFORM);
+    });
+}
+
+/**
+ * Creates the arcgis.format2 collection by restructuring the 
+ * arcgis.training collection.
+ */
+function createTrainingWildfiresFormat2() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const sourceDbName = "arcgis";
+        const sourceCollectionName = "training";
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const outputDbName = "arcgis";
+        const outputCollectionName = "format2";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            // update each doc, setting the event id as the primary id
+            async.map(docs, (doc, mapCb) => {
+                const eventId = doc["Event"];
+                doc = _.omit(doc, "Event");
+                doc["_id"] = eventId;
+                mapCb(null, doc);
+            }, (mapErr, mapRes) => {
+                cb(null, mapRes);
             });
         });
-    }
-    return Promise.all(sourceCollectionNames.map(promisify));
+    });
 }
 
 /**
@@ -390,6 +435,8 @@ function collectWildfireData() {
             .then(createUniqueFromEvents)
             .then(createWildfiresFromUnique)
             .then(createStandardizedWildfires)
+            .then(createTrainingWildfires)
+            .then(createTrainingWildfiresFormat2)
             .then(resolve)
             .catch(err => {
                 reject(err);
@@ -397,227 +444,41 @@ function collectWildfireData() {
     });
 }
 
-/**
- * Entry point for the wildfire training data filtering stage.
- * Creates the local arcgis.training collection from the local arcgis.standardized collection.
- */
-function createTrainingWildfires() {
-    return new Promise((resolve, reject) => {
-        const query = WILDFIRE_CONFIG.query;
-        const outputDbUrl = WILDFIRE_CONFIG.outputDbUrl;
-        const outputDbName = WILDFIRE_CONFIG.outputDbName;
-        const outputCollectionName = WILDFIRE_CONFIG.outputCollectionName;
-        createStandardizedView(query, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, WILDFIRE_CONFIG.transform);
-    });
-}
 
-function createTrainingWildfiresMap() {
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName = "arcgis";
-        const sourceCollectionName = "training";
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "arcgis";
-        const outputCollectionName = "map";
-        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (docs, cb) => {
-            const res = {};
-            for (let i = 0; i < docs.length; i++) {
-                console.log(i);
-                const doc = docs[i];
-                const eventId = doc["Event"];
-                if (!res[eventId]) {
-                    res[eventId] = {};
+/**
+ * Uploads the arcgis.raw, arcgis.events, arcgis.unique, arcgis.wildfires, and arcgis.standardized 
+ * collections to a backup database specified in the wildfire config object.
+ */
+function backupWildfireData() {
+    const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+    const sourceDbName = WILDFIRE_CONFIG.PRIMARY_DB_NAME;
+    const sourceCollectionNames = ["raw", "events", "unique", "wildfires", "standardized", "training", "format2"];
+    const outputDbUrl = WILDFIRE_CONFIG.SECONDARY_MONGODB_URL;
+    const outputDbName = WILDFIRE_CONFIG.SECONDARY_DB_NAME;
+    const promisify = (sourceCollectionName) => {
+        return new Promise((resolve, reject) => {
+            const outputCollectionName = sourceCollectionName;
+            loadSave({}, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve();
                 }
-                res[eventId] = _.omit(doc, "Event");
-            }
-            cb(null, [res]);
+            });
         });
-    });
-}
-
-/**
- * Creates the arcgis.nonfire collection by loading the nonfire JSON
- */
-function createNonFireEvents() {
-    return new Promise((resolve, reject) => {
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "arcgis";
-        const outputCollectionName = "nonfire";
-        MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
-            if (outputDbError) {
-                reject(outputDbError);
-            } else {
-                const outputDb = outputDbClient.db(outputDbName);
-
-                const nonfireOutputDbConfig = {
-                    dbURL: outputDbUrl, // unused
-                    dbConnection: outputDb,
-                    batchSize: 50,
-                    collection: outputCollectionName
-                };
-
-                const writableStream = streamToMongoDB(nonfireOutputDbConfig);
-
-                loadNonFireJSON()
-                    .then(json => {
-                        json = json.map((event, idx) => ({ ...event, "Event": `NONFIRE_${idx}` }));
-                        const readStream = streamify(json);
-                        readStream
-                            .pipe(writableStream)
-                            .on('data', (chunk) => {
-                                logger.info(`processing chunk`);
-                            })
-                            .on('error', (err) => {
-                                logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
-                                reject(err);
-                            })
-                            .on('finish', () => {
-                                logger.info(`saved data to ${outputDbName}/${outputCollectionName} successfully`);
-                                outputDbClient.close();
-                                resolve();
-                            });
-                    })
-                    .catch(reject);
-            }
-        });
-    });
-}
-
-/**
- * Creates the arcgis.nonfire collection by loading the nonfire JSON
- */
-function createRahulNonFireEvents() {
-    return new Promise((resolve, reject) => {
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "arcgis";
-        const outputCollectionName = "nonfireRahul";
-        MongoClient.connect(outputDbUrl, (outputDbError, outputDbClient) => {
-            if (outputDbError) {
-                reject(outputDbError);
-            } else {
-                const outputDb = outputDbClient.db(outputDbName);
-
-                const nonfireOutputDbConfig = {
-                    dbURL: outputDbUrl, // unused
-                    dbConnection: outputDb,
-                    batchSize: 50,
-                    collection: outputCollectionName
-                };
-
-                const writableStream = streamToMongoDB(nonfireOutputDbConfig);
-
-                const startIndex = 1000;
-
-                loadRahulNonFireJSON()
-                    .then(json => {
-                        json = json.map((event, idx) => ({ ...event, "Event": `NONFIRE_${idx + startIndex}` }));
-                        const readStream = streamify(json);
-                        readStream
-                            .pipe(writableStream)
-                            .on('data', (chunk) => {
-                                logger.info(`processing chunk`);
-                            })
-                            .on('error', (err) => {
-                                logger.warn(`yo, there was an error writing to ${outputDbName}/${outputCollectionName}`);
-                                reject(err);
-                            })
-                            .on('finish', () => {
-                                logger.info(`saved data to ${outputDbName}/${outputCollectionName} successfully`);
-                                outputDbClient.close();
-                                resolve();
-                            });
-                    })
-                    .catch(reject);
-            }
-        });
-    });
-}
-
-/**
- * Creates the arcgis.nonfireAll collection from the arcgis.nonfire 
- * and arcgis.nonfireRahul collections
- */
-function combineAllNonFireEvents() {
-    return new Promise((resolve, reject) => {
-        const query_1 = {};
-        const projection_1 = {};
-
-        const query_2 = {};
-        const projection_2 = {};
-
-        const sourceDbUrl_1 = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName_1 = "arcgis";
-        const sourceCollectionName_1 = "nonfire";
-
-        const sourceDbUrl_2 = WILDFIRE_CONFIG.MONGODB_URL;
-        const sourceDbName_2 = "arcgis";
-        const sourceCollectionName_2 = "nonfireRahul";
-
-        const outputDbUrl = WILDFIRE_CONFIG.MONGODB_URL;
-        const outputDbName = "arcgis";
-        const outputCollectionName = "nonfireAll";
-
-        // stream the documents from the first collection to the output database
-        streamSave(query_1, projection_1, sourceDbUrl_1, sourceDbName_1, sourceCollectionName_1, outputDbUrl, outputDbName, outputCollectionName, (err_1) => {
-            if (err_1) {
-                reject(err_1);
-            } else {
-                // stream the documents from the second collection to the output database
-                streamSave(query_2, projection_2, sourceDbUrl_2, sourceDbName_2, sourceCollectionName_2, outputDbUrl, outputDbName, outputCollectionName, (err_2) => {
-                    if (err_2) {
-                        reject(err_2);
-                    } else {
-                        resolve();
-                    }
-                }, (doc, cb) => {
-                    cb(null, doc);
-                });
-            }
-        }, (doc, cb) => {
-            cb(null, doc);
-        });
-    });
-}
-
-
-function loadNonFireJSON() {
-    return new Promise((resolve, reject) => {
-        const content = fs.readFileSync("C:\\Users\\Ricky\\Documents\\MATH 4025 Applied Math Capstone\\predicting-wildfire-risk\\data\\non-fire-events.json");
-        const json = JSON.parse(content);
-        console.log(typeof (json));
-        console.log(JSON.stringify(json, null, 4));
-        resolve(json);
-    });
-}
-
-function loadRahulNonFireJSON() {
-    return new Promise((resolve, reject) => {
-        const content = fs.readFileSync("C:\\Users\\Ricky\\Documents\\MATH 4025 Applied Math Capstone\\predicting-wildfire-risk\\data\\non-fire-NEW-Rahul-validation.json");
-        const json = JSON.parse(content);
-        console.log(typeof (json));
-        console.log(JSON.stringify(json, null, 4));
-        resolve(json);
-    });
+    }
+    if (outputDbUrl && outputDbName) {
+        // Upload each collection in parallel asynchronously
+        return Promise.all(sourceCollectionNames.map(promisify));
+    } else {
+        return Promise.reject(new Error("Secondary database not specified, check config"));
+    }
 }
 
 function wildfireStages() {
     return new Promise((resolve, reject) => {
-        // collectWildfireData()
-        createRahulNonFireEvents()
-        // combineAllNonFireEvents()
+        collectWildfireData()
+            .then(backupWildfireData)
             .then(resolve)
             .catch(err => {
                 reject(err);

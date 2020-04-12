@@ -20,6 +20,7 @@ const queryB = {
     // 25,667 total "WF" events
     isWildfire: { $and: [{ "inc_type": { $ne: null } }, { "inc_type": { $eq: "WF" } }] },
     hasStartDate: { $and: [{ "start_date": { $ne: null } }, { "start_hour": { $ne: null } }] },
+    // TODO: Need to match documents with "start_date" as string with only a space i.e. " "
     hasEventId: { $and: [{ "incident_n": { $ne: null } }, { "incident_n": { $ne: " " } }, { "incident_n": { $ne: "" } }] },
     hasEventName: { $and: [{ "fire_name": { $ne: null } }, { "fire_name": { $ne: " " } }, { "fire_name": { $ne: "" } }] },
     hasLatLon: { $and: [{ "latitude": { $ne: null } }, { "longitude": { $ne: null } }] },

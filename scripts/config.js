@@ -3,11 +3,11 @@ const logger = require('./logger');
 const { inBounds } = require('./utils');
 
 const WILDFIRE_CONFIG = {
-    query: { $and: [{ "State": { $eq: "CA" } }, { $or: [{ "Size": { $gte: 0 } }, { "Costs": { $gte: 0 } }] }] },
-    outputDbUrl: process.env.MONGODB_URL,
-    outputDbName: 'arcgis',
-    outputCollectionName: 'training',
-    transform: (docs) => {
+    QUERY: { $and: [{ "State": { $eq: "CA" } }, { $or: [{ "Size": { $gte: 0 } }, { "Costs": { $gte: 0 } }] }] },
+    PRIMARY_MONGODB_URL: process.env.PRIMARY_MONGODB_URL,
+    PRIMARY_DB_NAME: 'arcgis',
+    PRIMARY_COLLECTION_NAME: 'training',
+    TRANSFORM: (docs) => {
         return docs.filter(doc => {
             const isInBounds = inBounds(doc["Latitude"], doc["Longitude"]);
             if (!isInBounds) {
@@ -15,7 +15,10 @@ const WILDFIRE_CONFIG = {
             }
             return isInBounds;
         });
-    }
+    },
+    SECONDARY_MONGODB_URL: process.env.SECONDARY_MONGODB_URL,
+    SECONDARY_DB_NAME: 'arcgis',
+    SECONDARY_COLLECTION_NAME: 'training'
 };
 
 const CLIMATE_CONFIG = {
