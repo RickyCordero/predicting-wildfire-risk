@@ -18,13 +18,17 @@ The inputs to this model consist of 2 weeks of leading and trailing meteorologic
 
 ![Alt text](img/training_data_geo_distribution.png?raw=true "Training data geographic distribution")
 
+![Alt text](img/fire_sizes.png?raw=true "Log normalized fire sizes")
+
+![Alt text](img/log_fire_sizes.png?raw=true "Log normalized fire sizes")
+
 ## Workflow
 
 ![Alt text](img/workflow.png?raw=true "Training data geographic distribution")
 
-![Alt text](img/fire_sizes.png?raw=true "Log normalized fire sizes")
-
 ![Alt text](img/loss_curves.png?raw=true "Loss curves")
+
+
 ## Data Sources
 
 - Meteorological Data: Dark Sky Time Machine API (https://darksky.net/dev/docs#time-machine-request)
