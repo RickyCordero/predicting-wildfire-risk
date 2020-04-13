@@ -18,7 +18,7 @@ The inputs to this model consist of 2 weeks of leading and trailing meteorologic
 
 ![Alt text](img/training_data_geo_distribution.png?raw=true "Training data geographic distribution")
 
-![Alt text](img/fire_sizes.png?raw=true "Log normalized fire sizes")
+![Alt text](img/fire_sizes.png?raw=true "Fire sizes")
 
 ![Alt text](img/log_fire_sizes.png?raw=true "Log normalized fire sizes")
 
