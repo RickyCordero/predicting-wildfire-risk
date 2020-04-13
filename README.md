@@ -14,7 +14,7 @@ The ```tf``` folder contains all code related to model development.
 
 The inputs to this model consist of 2 weeks of leading and trailing meteorological factors including temperature, wind, and humidity relative to the ignition date of a wildfire event. The model will seek to approximate a high dimensional mapping from the input space to a real value fire size in acres.
 
-
+![Alt text](img/relational_training.png?raw=true "Training data table")
 
 ![Alt text](img/training_data_geo_distribution.png?raw=true "Training data geographic distribution")
 
