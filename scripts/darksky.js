@@ -1,16 +1,142 @@
 const logger = require('./logger');
 
-const { saveToDBEach } = require('./db');
-const { CLIMATE_CONFIG } = require('./config');
-const request = require('request');
-const moment = require('moment-timezone');
-const { Transform } = require('stream');
 const async = require('async');
+const request = require('request');
+const { Transform } = require('stream');
 const MongoClient = require('mongodb').MongoClient;
 const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
 const streamify = require('stream-array');
+const moment = require('moment-timezone');
+
+const { WILDFIRE_CONFIG } = require('./config');
+const { CLIMATE_CONFIG } = require('./config');
+const { saveToDBEach } = require('./db');
 
 const INTERVALS = ['currently', 'minutely', 'hourly', 'alerts', 'flags', 'daily'];
+
+
+/*
+    Sample Dark Sky Time Machine response object at the 'daily' interval (with time transformation):
+
+            https://darksky.net/dev/docs#data-point-object
+            {
+                "time": "2007-07-05T07:00:00.000Z",
+                "summary": "Mostly cloudy throughout the day.",
+                "icon": "partly-cloudy-day",
+                "sunriseTime": 1183640022,
+                "sunsetTime": 1183691908,
+                "moonPhase": 0.68,
+                "precipIntensity": 0,
+                "precipIntensityMax": 0,
+                "precipProbability": 0,
+                "temperatureHigh": 85.11,
+                "temperatureHighTime": 1183669200,
+                "temperatureLow": 50.99,
+                "temperatureLowTime": 1183716000,
+                "apparentTemperatureHigh": 85.11,
+                "apparentTemperatureHighTime": 1183669200,
+                "apparentTemperatureLow": 50.99,
+                "apparentTemperatureLowTime": 1183716000,
+                "dewPoint": 51.24,
+                "humidity": 0.64,
+                "pressure": 1011.77,
+                "windSpeed": 1.91,
+                "windGust": 13.12,
+                "windGustTime": 1183690800,
+                "windBearing": 260,
+                "cloudCover": 0.63,
+                "uvIndex": 10,
+                "uvIndexTime": 1183665600,
+                "visibility": 6.51,
+                "temperatureMin": 55.28,
+                "temperatureMinTime": 1183701600,
+                "temperatureMax": 85.11,
+                "temperatureMaxTime": 1183669200,
+                "apparentTemperatureMin": 55.28,
+                "apparentTemperatureMinTime": 1183701600,
+                "apparentTemperatureMax": 85.11,
+                "apparentTemperatureMaxTime": 1183669200
+            }
+*/
+
+
+/**
+ * Transforms a climate data object.
+ * @param {Object} datum - The climate datum object
+ */
+function transformClimateDatum(datum) {
+    /**
+     * Example schema of a climate.training document
+     * {
+     *      hourly: [ // 29 items
+     *          {
+     *              latitude: 33.6172,
+     *              longitude: -116.15083
+     *              timezone: "America/Los_Angeles"
+     *              hourly: {
+     *                  summary: "Mostly cloudy until morning and breezy starting in the afternoon",
+     *                  icon: "wind",
+     *                  data: [ // 24 items
+     *                          {
+     *                            time: 1011772800,
+     *                            summary: "Overcast",
+     *                            icon: "cloudy",
+     *                            precipType: "rain",
+     *                            temperature: 55.44,
+     *                            apparentTemperature: 55.44,
+     *                            dewPoint: 20.01,
+     *                            humidity: 0.25,
+     *                            pressure: 1014.73,
+     *                            windSpeed: 7.88,
+     *                            windGust: 11.51,
+     *                            windBearing: 342,
+     *                            cloudCover: 1,
+     *                            uvIndex: 0,
+     *                            visibility: 10
+     *                          },
+     *                          ...
+     *                  ]
+     *              },
+     *              offset: -8
+     *          },
+     *          ...
+     *      ],
+     *      requests: 29,
+     *      startDate: "2002-01-23T00:00:00-08:00"
+     *      endDate: "2002-02-20T00:00:00-08:00",
+     *      latitude: -116.15083,
+     *      Event: "CA-RRU-009418"
+     * }
+     */
+    const res = {
+        "Event": datum["Event"],
+        "Latitude": datum["latitude"],
+        "Longitude": datum["longitude"],
+        points: []
+    };
+    let key;
+    if (datum["hourly"]) {
+        key = "hourly";
+    } else if (datum["daily"]) {
+        key = "daily";
+    }
+    const objects = datum[key];
+    if (objects.length == 1) {
+        logger.warn("I think I found a missing event:")
+        logger.warn(datum["Event"]);
+    }
+    if (objects) {
+        res.points = objects.reduce((points, dayObj) => {
+            if (dayObj[key]) {
+                if (dayObj[key].data) {
+                    return points.concat(dayObj[key].data);
+                }
+            }
+            return points;
+        }, []);
+    }
+    return res;
+}
 
 /**
  * Retrieves and returns historical weather data for each wildfire object in the wildfires array from the given config object
@@ -173,6 +299,11 @@ function download(results, apiKey, startDate, endDate, latitude, longitude, inte
     });
 }
 
+/**
+ * Creates a transform stream object to collect climate
+ * data for an array of wildfire events.
+ * @param {Object} climateConfig - The config object
+ */
 const getClimateData = (climateConfig) => new Transform({
     writableObjectMode: true, // read an object
     readableObjectMode: true, // pass an object
@@ -190,6 +321,11 @@ const getClimateData = (climateConfig) => new Transform({
     }
 });
 
+/**
+ * Creates a transform stream object to collect climate
+ * data for a given wildfire event.
+ * @param {Object} climateConfig - The config object
+ */
 const getClimateDataEach = (climateConfig) => new Transform({
     writableObjectMode: true, // read an object
     readableObjectMode: true, // pass an object
@@ -210,7 +346,7 @@ const getClimateDataEach = (climateConfig) => new Transform({
 });
 
 /**
- * Downloads and streams climate data for each wildfire from the given source collection into the output collection
+ * Downloads and streams climate data for each wildfire from the given source collection into the output collection.
  * @param {Object} query - The mongo query object
  * @param {String} sourceDbUrl - The mongo url of the source database
  * @param {String} sourceDbName - The name of the source database
@@ -277,15 +413,15 @@ const saveClimateData = (query, sourceDbUrl, sourceDbName, sourceCollectionName,
 };
 
 /**
- * Entry point for the climate data collection and saving stage.
- * Creates the local climate.training collection from the local arcgis.training collection.
+ * Creates the climate.training collection from the arcgis.training collection.
  */
-function saveClimateDataFromTraining() {
+function saveClimateDataFromArcgis() {
     return new Promise((resolve, reject) => {
         const query = {};
         const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
-        const sourceDbName = "arcgis";
+        const sourceDbName = WILDFIRE_CONFIG.PRIMARY_DB_NAME;
         const sourceCollectionName = "training";
+        // TODO: Move the output climate database info to the climate config object
         const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "training";
@@ -300,15 +436,93 @@ function saveClimateDataFromTraining() {
 }
 
 /**
- * Creates the remote climate/training collection from the local climate/training collection using streams
+ * Creates the climate.training2 collection by restructuring each 
+ * climate data object's climate data attributes for each object
+ * in the climate.training collection.
  */
-function uploadClimateData() {
+function createClimateTraining2() { // uses streams
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const projection = {};
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training";
+
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const outputDbName = "climate";
+        const outputCollectionName = "training2";
+        streamSave(query, projection, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (doc, cb) => {
+            if (doc.error) {
+                logger.warn(`filtering out error found in ${sourceDbName}/${sourceCollectionName}`);
+                cb(doc.error);
+            } else {
+                cb(null, transformClimateDatum(doc));
+            }
+        });
+    });
+}
+
+/**
+ * Creates the climate.map collection from the climate.training collection.
+ */
+function createTrainingClimateMap() {
     return new Promise((resolve, reject) => {
         const query = {};
         const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
         const sourceDbName = "climate";
         const sourceCollectionName = "training";
-        const outputDbUrl = process.env.MONGODB_URL;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const outputDbName = "climate";
+        const outputCollectionName = "map";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            // splits the climate training collection into partitions
+            const partitions = [];
+            const split = 2;
+            const p = docs.length / split;
+            for (let i = 0; i < split; i++) {
+                console.log(i);
+                const res = {};
+                for (let j = i * p; j < i * p + p; j++) {
+                    console.log('-------' + j);
+                    const doc = docs[j];
+                    const eventId = doc["Event"];
+                    if (!res[eventId]) {
+                        res[eventId] = {};
+                    }
+                    res[eventId] = _.omit(doc, "Event");
+                }
+                partitions.push(res);
+            }
+
+            cb(null, partitions);
+        });
+    });
+}
+
+
+/**
+ * Creates the remote climate.training collection from the local climate/training collection using streams.
+ */
+function backupClimateData() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const sourceDbName = "climate";
+        const sourceCollectionName = "training";
+        // TODO: Move the remote output climate database info to the climate config object
+        const outputDbUrl = WILDFIRE_CONFIG.SECONDARY_MONGODB_URL;
         const outputDbName = "climate";
         const outputCollectionName = "training";
         MongoClient.connect(sourceDbUrl, (sourceDbError, sourceDbClient) => {
@@ -357,69 +571,15 @@ function uploadClimateData() {
     });
 }
 
-function createTrainingClimateMap() {
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
-        const sourceDbName = "climate";
-        const sourceCollectionName = "training";
-        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
-        const outputDbName = "climate";
-        const outputCollectionName = "map";
-        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        }, (docs, cb) => {
-            const partitions = [];
-            const split = 2;
-            const p = docs.length / split;
-            for (let i = 0; i < split; i++) {
-                console.log(i);
-                const res = {};
-                for (let j = i * p; j < i * p + p; j++) {
-                    console.log('-------' + j);
-                    const doc = docs[j];
-                    const eventId = doc["Event"];
-                    if (!res[eventId]) {
-                        res[eventId] = {};
-                    }
-                    res[eventId] = _.omit(doc, "Event");
-                }
-                partitions.push(res);
-            }
-
-            cb(null, partitions);
-        });
-    });
-}
-
-function collectNonFireClimate() {
-    return new Promise((resolve, reject) => {
-        const query = {};
-        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
-        const sourceDbName = "arcgis";
-        const sourceCollectionName = "nonfire";
-
-        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
-        const outputDbName = "climate";
-        const outputCollectionName = "nonfire";
-        saveClimateData(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
-            if (err) {
-                logger.warn('yo there was an error saving the nonfire climate data');
-                reject(err);
-            } else {
-                resolve();
-            }
-        });
-    });
-}
-
+/**
+ * Entry point for the climate data processing stage.
+ */
 function climateStages() {
     return new Promise((resolve, reject) => {
-        saveClimateDataFromTraining()
+        saveClimateDataFromArcgis()
+            .then(createClimateTraining2)
+            .then(createTrainingClimateMap)
+            .then(backupClimateData)
             .then(resolve)
             .catch(err => {
                 reject(err);

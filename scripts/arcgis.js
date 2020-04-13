@@ -393,6 +393,40 @@ function createTrainingWildfires() {
 }
 
 /**
+ * Creates the arcgis.map collection by restructuring the 
+ * arcgis.training collection.
+ */
+function createTrainingWildfiresMap() {
+    return new Promise((resolve, reject) => {
+        const query = {};
+        const sourceDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const sourceDbName = WILDFIRE_CONFIG.PRIMARY_DB_NAME;
+        const sourceCollectionName = WILDFIRE_CONFIG.PRIMARY_COLLECTION_NAME;
+        const outputDbUrl = WILDFIRE_CONFIG.PRIMARY_MONGODB_URL;
+        const outputDbName = "arcgis";
+        const outputCollectionName = "map";
+        loadSave(query, sourceDbUrl, sourceDbName, sourceCollectionName, outputDbUrl, outputDbName, outputCollectionName, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        }, (docs, cb) => {
+            const res = {};
+            for (let i = 0; i < docs.length; i++) {
+                const doc = docs[i];
+                const eventId = doc["Event"];
+                if (!res[eventId]) {
+                    res[eventId] = {};
+                }
+                res[eventId] = _.omit(doc, "Event");
+            }
+            cb(null, [res]);
+        });
+    });
+}
+
+/**
  * Creates the arcgis.format2 collection by restructuring the 
  * arcgis.training collection.
  */
@@ -425,8 +459,10 @@ function createTrainingWildfiresFormat2() {
     });
 }
 
+
+
 /**
- * Entry point for the wildfire data collection stage.
+ * Entry point for the wildfire data collection process.
  */
 function collectWildfireData() {
     return new Promise((resolve, reject) => {
@@ -436,7 +472,7 @@ function collectWildfireData() {
             .then(createWildfiresFromUnique)
             .then(createStandardizedWildfires)
             .then(createTrainingWildfires)
-            .then(createTrainingWildfiresFormat2)
+            .then(createTrainingWildfiresMap)
             .then(resolve)
             .catch(err => {
                 reject(err);
@@ -475,6 +511,9 @@ function backupWildfireData() {
     }
 }
 
+/**
+ * Entry point for the wildfire data processing stage.
+ */
 function wildfireStages() {
     return new Promise((resolve, reject) => {
         collectWildfireData()

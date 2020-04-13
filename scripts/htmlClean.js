@@ -1,5 +1,6 @@
 const logger = require('./logger');
 
+const async = require('async');
 const MongoClient = require('mongodb').MongoClient;
 const { filterFires, getFileNames, getFileNamesStream, loadHtml, convertHtmlToJsonObjects, cleanWildfireData, indexWildfires, arrayLength } = require('./wildfire');
 const DATA_FOLDER = process.env.DATA_FOLDER;

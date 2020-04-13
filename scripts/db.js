@@ -1,6 +1,7 @@
 const logger = require('./logger');
 
 const _ = require('lodash');
+const async = require('async');
 const MongoClient = require('mongodb').MongoClient;
 const streamToMongoDB = require('stream-to-mongo-db').streamToMongoDB;
 const streamify = require('stream-array');
