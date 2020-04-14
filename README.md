@@ -24,7 +24,7 @@ The inputs to this model consist of 2 weeks of leading and trailing meteorologic
 
 ## Workflow
 
-![Alt text](img/workflow.png?raw=true "Training data geographic distribution")
+![Alt text](img/workflow.png?raw=true "Workflow")
 
 ![Alt text](img/loss_curves.png?raw=true "Loss curves")
 
