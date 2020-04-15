@@ -22,6 +22,8 @@ The inputs to this model consist of 2 weeks of leading and trailing meteorologic
 
 ![Alt text](img/log_fire_sizes.png?raw=true "Log normalized fire sizes")
 
+![Alt text](img/3d_correlation.png?raw=true "3d correlation")
+
 ## Workflow
 
 ![Alt text](img/workflow.png?raw=true "Workflow")
