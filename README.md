@@ -6,9 +6,9 @@ A machine learning project to predict wildfire size in California using historic
 
 ### Usage
 
-The ```scripts``` folder contains all scripts used to construct the master dataset used for model development.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/RickyCordero/predicting-wildfire-risk/blob/master/notebook.ipynb)
 
-The ```tf``` folder contains all code related to model development.
+The ```climate_scripts``` folder contains all scripts used to construct the master dataset used for model development.
 
 ## Data Model
 
