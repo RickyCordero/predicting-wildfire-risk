@@ -1,8 +1,9 @@
 climate_scripts/*.env
 climate_scripts/log
 climate_scripts/node_modules
-model/.ipynb_checkpoints
-model/example
-model/*.log
+.ipynb_checkpoints
+example
+*.log
+data
 .DS_Store
 .idea
