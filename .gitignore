@@ -4,6 +4,5 @@ climate_scripts/node_modules
 .ipynb_checkpoints
 example
 *.log
-data
 .DS_Store
 .idea
