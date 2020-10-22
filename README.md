@@ -1,14 +1,16 @@
 # predicting-wildfire-risk
 
-A machine learning project to predict wildfire size in California using historical meteorological data and historical wildfire event data.
+A machine learning project to predict wildfire size in California using historical meteorological data and historical wildfire event data from 2002 - 2019.
 
 ## Getting Started
 
 ### Usage
 
+This notebook contains all code to analyze and build models from our original dataset.
+
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/RickyCordero/predicting-wildfire-risk/blob/master/notebook.ipynb)
 
-The ```climate_scripts``` folder contains all scripts used to construct the master dataset used for model development.
+The ```climate_scripts``` folder contains all scripts used to construct the dataset used for model development.
 
 ## Data Model
 
