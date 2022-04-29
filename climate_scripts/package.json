@@ -11,7 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "async": "2.6.2",
+    "async": "2.6.4",
     "express": "^4.16.4",
     "html-table-to-json": "0.4.0",
     "json2csv": "^4.4.1",
