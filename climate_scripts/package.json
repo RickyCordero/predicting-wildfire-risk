@@ -16,7 +16,7 @@
     "html-table-to-json": "0.4.0",
     "json2csv": "^4.4.1",
     "lodash": "4.17.11",
-    "moment-timezone": "0.5.23",
+    "moment-timezone": "0.5.35",
     "mongodb": "2.2.33",
     "npm": "^6.9.0",
     "request": "2.88.0",
